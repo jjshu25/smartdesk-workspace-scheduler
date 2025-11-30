@@ -1,0 +1,21 @@
+{
+  "short_name": "SmartDesk",
+  "name": "SmartDesk: A Minimalist Digital Workspace Scheduler",
+  "description": "An intelligent workspace management application that optimizes seat arrangements, tracks usage history, and simulates smart desk hardware features like beacons, auto-locking, and environmental sensors for an efficient office experience.",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1e40af",
+  "background_color": "#f8fafc"
+}

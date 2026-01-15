@@ -27,46 +27,21 @@ const PCMonitoringDashboard: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
   useEffect(() => {
-    const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'http://localhost:5000';
-
-    console.log(`🔌 Connecting to server at ${SERVER_URL}`);
-
-    const newSocket = io(SERVER_URL, {
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 10,
-      transports: ['websocket', 'polling'],
-    });
-
-    newSocket.on('connect', () => {
-      setConnectionStatus('connected');
-      console.log('✓ Connected to server');
-    });
-
-    newSocket.on('pc-list-updated', (pcList: PC[]) => {
-      setPCs(pcList.sort((a, b) => a.name.localeCompare(b.name)));
-      console.log(`📊 PC list updated: ${pcList.length} PCs online`);
-    });
-
-    newSocket.on('pc-updated', (pc: PC) => {
-      setPCs(prev => prev.map(p => p.id === pc.id ? pc : p));
-    });
-
-    newSocket.on('disconnect', () => {
-      setConnectionStatus('disconnected');
-      console.log('✗ Disconnected from server');
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
+    // Listen for PC updates from the global service
+    const checkPCs = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/pcs');
+        const pcs = await response.json();
+        setPCs(pcs);
+      } catch (error) {
+        console.error('Failed to fetch PCs:', error);
+      }
     };
+
+    checkPCs();
+    const interval = setInterval(checkPCs, 5000); // Refresh every 5 seconds
+    
+    return () => clearInterval(interval);
   }, []);
 
   const sendCommand = (pcId: string, command: string) => {

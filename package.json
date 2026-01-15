@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:server": "ts-node server/server.ts",
-    "dev:full": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "dev:server": "tsx watch server/server.ts",
+    "dev:pc-client": "tsx watch server/pc-client.ts",
+    "dev:full": "concurrently \"npm run dev\" \"npm run dev:server\" \"npm run dev:pc-client\"",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -18,7 +19,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "socket.io": "^4.7.2",
-    "socket.io-client": "^4.7.2"
+    "socket.io-client": "^4.7.2",
+    "systeminformation": "^5.30.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -26,6 +28,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.1",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

@@ -251,6 +251,50 @@ app.post('/api/command', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Command sent', pcId, command });
 });
 
+// Send command to specific PC
+app.post('/api/pc/:pcId/command', (req: Request, res: Response) => {
+  const { pcId } = req.params;
+  const { command } = req.body;
+
+  const pc = connectedPCs.get(pcId);
+  if (!pc) {
+    console.error(`❌ Command failed: PC ${pcId} not found`);
+    return res.status(404).json({ error: 'PC not found' });
+  }
+
+  // ✅ DETAILED LOGGING
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🎯 COMMAND REQUESTED FROM DASHBOARD`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`⏰ Time: ${new Date().toLocaleTimeString()}`);
+  console.log(`🖥️  Target PC: ${pc.name} (${pcId})`);
+  console.log(`📍 Location: ${pc.location}`);
+  console.log(`💻 OS: ${pc.osType} ${pc.osVersion}`);
+  console.log(`🌐 IP Address: ${pc.ipAddress}`);
+  console.log(`📊 Current Status: ${pc.status}`);
+  console.log(`🎬 Command: ${command.toUpperCase()}`);
+  
+  // ✅ ADD THIS: Special logging for USB commands
+  if (command === 'lock-usb') {
+    console.log(`⚠️  ACTION: Disabling USB Hub (Keyboard, Mouse, USB Devices)`);
+    console.log(`💡 Monitor will remain functional`);
+  } else if (command === 'unlock-usb') {
+    console.log(`✅ ACTION: Re-enabling USB Hub`);
+  }
+  
+  console.log(`${'='.repeat(60)}\n`);
+
+  // Send command to PC via Socket.IO
+  io.to(`pc-${pcId}`).emit('execute-command', { command });
+
+  console.log(`📡 Command emitted to Socket.IO room: pc-${pcId}`);
+
+  res.json({ 
+    success: true, 
+    message: `Command '${command}' sent to ${pc.name}` 
+  });
+});
+
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'Server is running',

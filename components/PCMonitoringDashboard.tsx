@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import io, { Socket } from 'socket.io-client';
 
 interface PC {
   id: string;
@@ -23,33 +22,75 @@ interface PC {
 const PCMonitoringDashboard: React.FC = () => {
   const [pcs, setPCs] = useState<PC[]>([]);
   const [selectedPC, setSelectedPC] = useState<PC | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
   useEffect(() => {
-    // Listen for PC updates from the global service
+    // Fetch PCs from server
     const checkPCs = async () => {
       try {
         const response = await fetch('http://localhost:5000/api/pcs');
-        const pcs = await response.json();
-        setPCs(pcs);
+        const data = await response.json();
+        setPCs(data);
+        setConnectionStatus('connected');
       } catch (error) {
         console.error('Failed to fetch PCs:', error);
+        setConnectionStatus('disconnected');
       }
     };
 
     checkPCs();
-    const interval = setInterval(checkPCs, 5000); // Refresh every 5 seconds
+    const interval = setInterval(checkPCs, 5000);
     
     return () => clearInterval(interval);
   }, []);
 
-  const sendCommand = (pcId: string, command: string) => {
-    socket?.emit('send-command', { pcId, command });
+  // ✅ ENHANCE THIS: Send command to PC
+  const sendCommand = async (pcId: string, command: string) => {
+    try {
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`📤 SENDING COMMAND FROM DASHBOARD`);
+      console.log(`${'='.repeat(60)}`);
+      console.log(`⏰ Time: ${new Date().toLocaleTimeString()}`);
+      console.log(`🖥️  PC ID: ${pcId}`);
+      console.log(`🎬 Command: ${command.toUpperCase()}`);
+      console.log(`${'='.repeat(60)}\n`);
+
+      const response = await fetch(`http://localhost:5000/api/pc/${pcId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        console.log(`✅ Command sent successfully`);
+        console.log(`📋 Response: ${JSON.stringify(result)}\n`);
+        alert(`✅ Command '${command}' sent to PC successfully`);
+      } else {
+        console.error(`❌ Failed to send command`);
+        console.error(`📋 Error: ${result.error}\n`);
+        alert(`❌ Failed to send command: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error sending command:', error);
+      console.error(`${'='.repeat(60)}\n`);
+      alert(`❌ Error sending command: ${error}`);
+    }
   };
 
-  const lockPC = (pcId: string) => {
-    socket?.emit('lock-pc', { pcId });
+  // ✅ ADD THIS: Confirm before dangerous actions
+  const sendDangerousCommand = (pcId: string, command: string) => {
+    const confirmMessage = {
+      'logout': '⚠️  This will log out the current user. Continue?',
+      'restart': '⚠️  This will restart the PC in 10 seconds. Continue?',
+      'shutdown': '⚠️  This will shut down the PC in 10 seconds. Continue?',
+    };
+
+    const message = confirmMessage[command as keyof typeof confirmMessage];
+    if (message && confirm(message)) {
+      sendCommand(pcId, command);
+    }
   };
 
   const getStatusStats = () => {
@@ -64,136 +105,176 @@ const PCMonitoringDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 p-8 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-4xl font-bold text-slate-800">Workspace Scheduling System</h1>
-          <p className="text-slate-600 mt-1">Real-time PC monitoring and control</p>
-        </div>
-        <div className={`px-4 py-2 rounded-lg font-semibold flex items-center gap-2 ${connectionStatus === 'connected' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-          <div className={`w-3 h-3 rounded-full ${connectionStatus === 'connected' ? 'bg-green-600 animate-pulse' : 'bg-red-600'}`}></div>
-          {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-green-50 border-l-4 border-green-500 p-6 rounded-lg shadow">
-          <div className="text-3xl font-bold text-green-600">{stats.online}</div>
-          <div className="text-slate-600">Online PCs</div>
-        </div>
-        <div className="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg shadow">
-          <div className="text-3xl font-bold text-blue-600">{stats.inUse}</div>
-          <div className="text-slate-600">In Use</div>
-        </div>
-        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow">
-          <div className="text-3xl font-bold text-red-600">{stats.offline}</div>
-          <div className="text-slate-600">Offline</div>
-        </div>
-      </div>
-
-      {/* PC Grid & Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* PC List */}
-        <div className="lg:col-span-3">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold text-slate-800 mb-4">Connected PCs ({pcs.length})</h2>
-            {pcs.length === 0 ? (
-              <div className="text-center py-12 text-slate-500">
-                <p className="text-lg">🖥️ No PCs detected yet</p>
-                <p className="text-sm mt-2">Waiting for PC connections...</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {pcs.map(pc => (
-                  <div
-                    key={pc.id}
-                    onClick={() => setSelectedPC(pc)}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedPC?.id === pc.id
-                        ? 'border-blue-500 shadow-lg bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-bold text-slate-800">{pc.name}</h3>
-                        <p className="text-xs text-slate-500">{pc.location}</p>
-                      </div>
-                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                        pc.status === 'online' ? 'bg-green-100 text-green-800' :
-                        pc.status === 'in-use' ? 'bg-blue-100 text-blue-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {pc.status === 'online' ? '● Online' : pc.status === 'in-use' ? '● In Use' : '● Offline'}
-                      </span>
-                    </div>
-
-                    {pc.currentUser && <p className="text-xs text-slate-600 mb-2">👤 {pc.currentUser}</p>}
-
-                    <div className="space-y-1 text-xs mb-3">
-                      <div className="flex justify-between">
-                        <span className="text-slate-600">CPU</span>
-                        <span className="font-semibold">{pc.cpuUsage.toFixed(1)}%</span>
-                      </div>
-                      <div className="w-full bg-gray-300 rounded-full h-1.5">
-                        <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${pc.cpuUsage}%` }}></div>
-                      </div>
-
-                      <div className="flex justify-between mt-2">
-                        <span className="text-slate-600">Memory</span>
-                        <span className="font-semibold">{pc.memoryUsage.toFixed(1)}%</span>
-                      </div>
-                      <div className="w-full bg-gray-300 rounded-full h-1.5">
-                        <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${pc.memoryUsage}%` }}></div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+      {/* Header Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600 text-sm">Total PCs</p>
+              <p className="text-3xl font-bold text-blue-600">{pcs.length}</p>
+            </div>
+            <span className="text-4xl">🖥️</span>
           </div>
         </div>
 
-        {/* PC Details Panel */}
-        <div className="bg-white rounded-xl shadow-lg p-6 h-fit">
-          {selectedPC ? (
-            <div className="space-y-4">
-              <h3 className="text-xl font-bold text-slate-800">{selectedPC.name}</h3>
-              <div className="space-y-2 text-sm">
-                <p><span className="font-semibold">PC ID:</span> {selectedPC.id}</p>
-                <p><span className="font-semibold">IP:</span> {selectedPC.ipAddress}</p>
-                <p><span className="font-semibold">MAC:</span> {selectedPC.macAddress}</p>
-                <p><span className="font-semibold">OS:</span> {selectedPC.osType} {selectedPC.osVersion}</p>
-                <p><span className="font-semibold">Location:</span> {selectedPC.location}</p>
-                <p><span className="font-semibold">Status:</span> <span className={`px-2 py-1 rounded text-xs font-bold ${selectedPC.status === 'online' ? 'bg-green-100 text-green-800' : selectedPC.status === 'in-use' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>{selectedPC.status}</span></p>
-                {selectedPC.currentUser && <p><span className="font-semibold">User:</span> {selectedPC.currentUser}</p>}
-              </div>
-              <div className="space-y-2 mt-4">
-                <div>
-                  <p className="text-xs font-semibold text-slate-600 mb-1">CPU: {selectedPC.cpuUsage.toFixed(1)}%</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-blue-500 h-2 rounded-full" style={{ width: `${selectedPC.cpuUsage}%` }}></div></div>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-slate-600 mb-1">Memory: {selectedPC.memoryUsage.toFixed(1)}%</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-green-500 h-2 rounded-full" style={{ width: `${selectedPC.memoryUsage}%` }}></div></div>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-slate-600 mb-1">Disk: {selectedPC.diskUsage.toFixed(1)}%</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-yellow-500 h-2 rounded-full" style={{ width: `${selectedPC.diskUsage}%` }}></div></div>
-                </div>
-              </div>
-              <div className="space-y-2 mt-4">
-                <button onClick={() => sendCommand(selectedPC.id, 'restart')} className="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600 font-semibold text-sm">Restart</button>
-                <button onClick={() => sendCommand(selectedPC.id, 'shutdown')} className="w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 font-semibold text-sm">Shutdown</button>
-                <button onClick={() => lockPC(selectedPC.id)} className="w-full bg-yellow-500 text-white py-2 rounded hover:bg-yellow-600 font-semibold text-sm">Lock Screen</button>
-              </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600 text-sm">Online</p>
+              <p className="text-3xl font-bold text-green-600">{stats.online}</p>
             </div>
-          ) : (
-            <p className="text-slate-500 text-center py-8">Select a PC to view details</p>
-          )}
+            <span className="text-4xl">🟢</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600 text-sm">In Use</p>
+              <p className="text-3xl font-bold text-yellow-600">{stats.inUse}</p>
+            </div>
+            <span className="text-4xl">🟡</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600 text-sm">Offline</p>
+              <p className="text-3xl font-bold text-red-600">{stats.offline}</p>
+            </div>
+            <span className="text-4xl">🔴</span>
+          </div>
         </div>
       </div>
+
+      {/* PC Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {pcs.map((pc) => (
+          <div key={pc.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
+            {/* PC Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold">{pc.name}</h3>
+                  <p className="text-blue-200 text-sm">{pc.location}</p>
+                </div>
+                <span className="text-3xl">{pc.status === 'online' ? '🟢' : pc.status === 'in-use' ? '🟡' : '🔴'}</span>
+              </div>
+            </div>
+
+            {/* PC Info */}
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">OS</p>
+                  <p className="font-semibold">{pc.osType}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">IP Address</p>
+                  <p className="font-semibold text-xs">{pc.ipAddress}</p>
+                </div>
+              </div>
+
+              {/* Metrics */}
+              <div className="space-y-2 border-t pt-3">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>CPU</span>
+                    <span className="font-bold text-blue-600">{pc.cpuUsage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      style={{ width: `${pc.cpuUsage}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>RAM</span>
+                    <span className="font-bold text-green-600">{pc.memoryUsage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-green-600 h-2 rounded-full transition-all"
+                      style={{ width: `${pc.memoryUsage}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>DISK</span>
+                    <span className="font-bold text-orange-600">{pc.diskUsage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-orange-600 h-2 rounded-full transition-all"
+                      style={{ width: `${pc.diskUsage}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ✅ UPDATE THESE: Command Buttons */}
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-600 uppercase">Actions</p>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => sendCommand(pc.id, 'lock-usb')}
+                    className="px-3 py-2 bg-red-500 text-white text-sm rounded hover:bg-red-600 transition-colors font-semibold flex items-center justify-center gap-1"
+                    title="Disable keyboard, mouse, and USB devices"
+                  >
+                    🔒 Lock USB
+                  </button>
+
+                  <button
+                    onClick={() => sendCommand(pc.id, 'unlock-usb')}
+                    className="px-3 py-2 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors font-semibold flex items-center justify-center gap-1"
+                    title="Re-enable keyboard, mouse, and USB devices"
+                  >
+                    🔓 Unlock USB
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => sendCommand(pc.id, 'logout')}
+                    className="px-3 py-2 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 transition-colors font-semibold flex items-center justify-center gap-1"
+                  >
+                    👤 Logout
+                  </button>
+
+                  <button
+                    onClick={() => sendDangerousCommand(pc.id, 'restart')}
+                    className="px-3 py-2 bg-orange-500 text-white text-sm rounded hover:bg-orange-600 transition-colors font-semibold flex items-center justify-center gap-1"
+                  >
+                    🔄 Restart
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => sendDangerousCommand(pc.id, 'shutdown')}
+                  className="w-full px-3 py-2 bg-gray-800 text-white text-sm rounded hover:bg-gray-900 transition-colors font-semibold"
+                >
+                  ⏹️ Shutdown
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Empty State */}
+      {pcs.length === 0 && (
+        <div className="text-center py-12">
+          <p className="text-gray-500 text-lg">No PCs connected yet...</p>
+          <p className="text-gray-400">Waiting for PC clients to register</p>
+        </div>
+      )}
     </div>
   );
 };

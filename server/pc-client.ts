@@ -88,7 +88,7 @@ function handleCommand(command: string, params?: any) {
   }
 }
 
-// Logout function - KEPT
+// Logout function - FIXED
 function logoutUser() {
   try {
     const platform = os.platform();
@@ -97,9 +97,10 @@ function logoutUser() {
     console.log(`⏳ Status: In Progress...`);
     
     if (platform === 'win32') {
-      console.log(`🪟 Executing Windows logout command: shutdown /l /t 0`);
+      console.log(`🪟 Executing Windows logout command: shutdown /l /f`);
       console.log('👤 Logging out user from Windows...');
-      execSync('shutdown /l /t 0', { stdio: 'inherit' });
+      // /l = logoff, /f = force close applications
+      execSync('shutdown /l /f', { stdio: 'inherit' });
     } else if (platform === 'darwin') {
       console.log(`🍎 Executing macOS logout command`);
       console.log('👤 Logging out user from macOS...');
@@ -121,7 +122,7 @@ function logoutUser() {
   }
 }
 
-// ✅ REPLACED: Lock USB function (was lockScreen)
+// ✅ FIXED: Lock USB function
 function lockUSB() {
   try {
     const platform = os.platform();
@@ -135,18 +136,19 @@ function lockUSB() {
       console.log(`📋 Command: Disabling all USB Human Input Devices...`);
       
       try {
-        // Disable HID (Human Interface Devices) - covers keyboard and mouse
-        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'OK\'} | ForEach-Object {Disable-PnpDevice -InstanceName $_.InstanceName -Confirm:$false}"', 
+        // Corrected PowerShell command - use -Name instead of -InstanceName
+        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
           { stdio: 'inherit' });
         
         console.log(`🔴 USB devices disabled (keyboard, mouse, USB devices)`);
         console.log(`✅ SUCCESS: USB Hub locked`);
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
-        // Alternative method using devcon if available
+        // Alternative: Use Get-PnpDevice with different approach
         try {
-          execSync('devcon disable *HID*', { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: USB devices disabled using devcon`);
+          execSync('powershell -Command "Get-PnpDevice -Class HIDClass -Status OK | ForEach-Object { pnputil /disable-device \\\"$($_.InstanceId)\\\" }"', 
+            { stdio: 'inherit' });
+          console.log(`✅ SUCCESS: USB devices disabled using pnputil`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;
@@ -176,7 +178,7 @@ function lockUSB() {
   }
 }
 
-// ✅ NEW: Unlock USB function
+// ✅ FIXED: Unlock USB function
 function unlockUSB() {
   try {
     const platform = os.platform();
@@ -190,7 +192,8 @@ function unlockUSB() {
       console.log(`📋 Command: Re-enabling all USB Human Input Devices...`);
       
       try {
-        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'Error\'} | ForEach-Object {Enable-PnpDevice -InstanceName $_.InstanceName -Confirm:$false}"', 
+        // Corrected PowerShell command for re-enabling
+        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
           { stdio: 'inherit' });
         
         console.log(`🟢 USB devices re-enabled (keyboard, mouse, USB devices)`);
@@ -198,8 +201,9 @@ function unlockUSB() {
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
         try {
-          execSync('devcon enable *HID*', { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: USB devices enabled using devcon`);
+          execSync('powershell -Command "Get-PnpDevice -Class HIDClass -Status Error | ForEach-Object { pnputil /enable-device \\\"$($_.InstanceId)\\\" }"', 
+            { stdio: 'inherit' });
+          console.log(`✅ SUCCESS: USB devices enabled using pnputil`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;

@@ -179,13 +179,14 @@ function lockUSB() {
         console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Disable...`);
         try {
           // Method 2: Use WMI Disable() method directly
+          // ✅ FIXED: Proper quote escaping for WMI filter
           execSync(
-            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"',
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"',
             { stdio: 'inherit' }
           );
           
           execSync(
-            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"',
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"',
             { stdio: 'inherit' }
           );
           
@@ -288,13 +289,14 @@ function unlockUSB() {
         console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Enable...`);
         try {
           // Method 2: Use WMI Enable() method directly
+          // ✅ FIXED: Proper quote escaping for WMI filter
           execSync(
-            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"',
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"',
             { stdio: 'inherit' }
           );
           
           execSync(
-            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"',
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"',
             { stdio: 'inherit' }
           );
           

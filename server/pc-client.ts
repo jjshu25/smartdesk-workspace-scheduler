@@ -10,7 +10,7 @@ const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {});
 
-const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://localhost:5000';
+const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://10.192.184.220:5000';
 
 let metricsInterval: NodeJS.Timeout | null = null;
 let mainSocket: any = null;

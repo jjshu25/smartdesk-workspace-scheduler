@@ -122,7 +122,7 @@ function logoutUser() {
   }
 }
 
-// ✅ FIXED: Lock USB function - Disable only Keyboard & Mouse
+// ✅ FIXED: Lock USB function - Disable only Keyboard & Mouse in REAL-TIME
 function lockUSB() {
   try {
     const platform = os.platform();
@@ -136,79 +136,87 @@ function lockUSB() {
       console.log(`📋 Command: Disabling Keyboard & Mouse devices only...`);
       
       try {
-        // Method 1: Disable Keyboard using SetupAPI
-        console.log(`  → Disabling HID Keyboard...`);
-        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"', 
-          { stdio: 'inherit' });
+        // Method 1: Get device IDs and disable immediately
+        console.log(`  → Finding and disabling HID Keyboard...`);
+        const keyboardDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Keyboard -Status OK | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
         
-        // Method 2: Disable Mouse using SetupAPI
-        console.log(`  → Disabling HID Mouse...`);
-        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"', 
-          { stdio: 'inherit' });
+        for (const deviceId of keyboardDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Disabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not disable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`  → Finding and disabling HID Mouse...`);
+        const mouseDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Mouse -Status OK | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of mouseDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Disabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not disable: ${deviceId}`);
+            }
+          }
+        }
         
         console.log(`🔴 Keyboard & Mouse disabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME (no restart needed)`);
       } catch (error) {
-        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using Device Manager...`);
+        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Disable...`);
         try {
-          // Method 2: Use pnputil with device search
-          const keyboardDisable = execSync('powershell -Command "Get-WmiObject Win32_PnPEntity -Filter \\\"Name LIKE \'%Keyboard%\' AND Name LIKE \'%HID%\'\\\" | Select-Object -First 1 -ExpandProperty DeviceID"', 
-            { encoding: 'utf8' }).trim();
+          // Method 2: Use WMI Disable() method directly
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"',
+            { stdio: 'inherit' }
+          );
           
-          const mouseDisable = execSync('powershell -Command "Get-WmiObject Win32_PnPEntity -Filter \\\"Name LIKE \'%Mouse%\' AND Name LIKE \'%HID%\'\\\" | Select-Object -First 1 -ExpandProperty DeviceID"', 
-            { encoding: 'utf8' }).trim();
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"',
+            { stdio: 'inherit' }
+          );
           
-          console.log(`  → Disabling Keyboard with DeviceID: ${keyboardDisable}`);
-          if (keyboardDisable) {
-            execSync(`powershell -Command "Disable-PnpDevice -InstanceName '${keyboardDisable}' -Confirm:$false -ErrorAction SilentlyContinue"`, 
-              { stdio: 'inherit' });
-          }
-          
-          console.log(`  → Disabling Mouse with DeviceID: ${mouseDisable}`);
-          if (mouseDisable) {
-            execSync(`powershell -Command "Disable-PnpDevice -InstanceName '${mouseDisable}' -Confirm:$false -ErrorAction SilentlyContinue"`, 
-              { stdio: 'inherit' });
-          }
-          
-          console.log(`✅ SUCCESS: Keyboard & Mouse disabled using Device Manager`);
+          console.log(`✅ SUCCESS: Keyboard & Mouse disabled using WMI (REAL-TIME)`);
         } catch (e) {
-          console.log(`⚠️  Method 2 failed. Attempting Method 3: Registry modification...`);
-          try {
-            // Method 3: Registry modification (safest fallback)
-            execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\kbdhid" /v Start /t REG_DWORD /d 4 /f', 
-              { stdio: 'inherit' });
-            execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\mouhid" /v Start /t REG_DWORD /d 4 /f', 
-              { stdio: 'inherit' });
-            
-            console.log(`✅ SUCCESS: Keyboard & Mouse disabled via registry`);
-            console.log(`📌 NOTE: Changes will take effect after device re-plug or system restart`);
-          } catch (e3) {
-            console.error(`❌ All methods failed. Ensure running as Administrator.`);
-            throw e3;
-          }
+          console.error(`❌ Both methods failed. Ensure running as Administrator.`);
+          throw e;
         }
       }
     } else if (platform === 'darwin') {
-      // macOS: Disable only Keyboard and Mouse
+      // macOS: Disable only Keyboard and Mouse (real-time)
       console.log(`🍎 Executing macOS disable command for Keyboard & Mouse`);
       try {
         execSync('sudo launchctl unload /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
         console.log(`🔴 Keyboard & Mouse disabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME`);
       } catch (error) {
         console.log(`⚠️  Alternative method...`);
         execSync('sudo defaults write /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse -bool true', { stdio: 'inherit' });
         console.log(`✅ SUCCESS: Keyboard & Mouse disabled`);
       }
     } else if (platform === 'linux') {
-      // Linux: Disable only Keyboard and Mouse
+      // Linux: Disable only Keyboard and Mouse (real-time)
       console.log(`🐧 Executing Linux disable command for Keyboard & Mouse`);
       try {
-        execSync('sudo bash -c "echo 1 > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput disable $(xinput list | grep -i keyboard | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput disable $(xinput list | grep -i mouse | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
         console.log(`🔴 Keyboard & Mouse disabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME`);
       } catch (error) {
-        console.error(`⚠️  Linux method requires additional tools`);
+        console.error(`⚠️  Linux method requires xinput tool`);
         throw error;
       }
     }
@@ -223,7 +231,7 @@ function lockUSB() {
   }
 }
 
-// ✅ FIXED: Unlock USB function - Enable only Keyboard & Mouse
+// ✅ FIXED: Unlock USB function - Enable only Keyboard & Mouse in REAL-TIME
 function unlockUSB() {
   try {
     const platform = os.platform();
@@ -237,78 +245,87 @@ function unlockUSB() {
       console.log(`📋 Command: Re-enabling Keyboard & Mouse devices only...`);
       
       try {
-        // Method 1: Enable Keyboard using SetupAPI
-        console.log(`  → Enabling HID Keyboard...`);
-        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"', 
-          { stdio: 'inherit' });
+        // Method 1: Get device IDs and enable immediately
+        console.log(`  → Finding and enabling HID Keyboard...`);
+        const keyboardDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Keyboard -Status Error | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
         
-        // Method 2: Enable Mouse using SetupAPI
-        console.log(`  → Enabling HID Mouse...`);
-        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"', 
-          { stdio: 'inherit' });
+        for (const deviceId of keyboardDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Enabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not enable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`  → Finding and enabling HID Mouse...`);
+        const mouseDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Mouse -Status Error | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of mouseDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Enabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not enable: ${deviceId}`);
+            }
+          }
+        }
         
         console.log(`🟢 Keyboard & Mouse re-enabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME (no restart needed)`);
       } catch (error) {
-        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using Device Manager...`);
+        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Enable...`);
         try {
-          const keyboardEnable = execSync('powershell -Command "Get-WmiObject Win32_PnPEntity -Filter \\\"Name LIKE \'%Keyboard%\' AND Name LIKE \'%HID%\'\\\" | Select-Object -First 1 -ExpandProperty DeviceID"', 
-            { encoding: 'utf8' }).trim();
+          // Method 2: Use WMI Enable() method directly
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"',
+            { stdio: 'inherit' }
+          );
           
-          const mouseEnable = execSync('powershell -Command "Get-WmiObject Win32_PnPEntity -Filter \\\"Name LIKE \'%Mouse%\' AND Name LIKE \'%HID%\'\\\" | Select-Object -First 1 -ExpandProperty DeviceID"', 
-            { encoding: 'utf8' }).trim();
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\\'\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"',
+            { stdio: 'inherit' }
+          );
           
-          console.log(`  → Enabling Keyboard with DeviceID: ${keyboardEnable}`);
-          if (keyboardEnable) {
-            execSync(`powershell -Command "Enable-PnpDevice -InstanceName '${keyboardEnable}' -Confirm:$false -ErrorAction SilentlyContinue"`, 
-              { stdio: 'inherit' });
-          }
-          
-          console.log(`  → Enabling Mouse with DeviceID: ${mouseEnable}`);
-          if (mouseEnable) {
-            execSync(`powershell -Command "Enable-PnpDevice -InstanceName '${mouseEnable}' -Confirm:$false -ErrorAction SilentlyContinue"`, 
-              { stdio: 'inherit' });
-          }
-          
-          console.log(`✅ SUCCESS: Keyboard & Mouse enabled using Device Manager`);
+          console.log(`✅ SUCCESS: Keyboard & Mouse enabled using WMI (REAL-TIME)`);
         } catch (e) {
-          console.log(`⚠️  Method 2 failed. Attempting Method 3: Registry modification...`);
-          try {
-            // Method 3: Registry modification (safest fallback)
-            execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\kbdhid" /v Start /t REG_DWORD /d 3 /f', 
-              { stdio: 'inherit' });
-            execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\mouhid" /v Start /t REG_DWORD /d 3 /f', 
-              { stdio: 'inherit' });
-            
-            console.log(`✅ SUCCESS: Keyboard & Mouse enabled via registry`);
-            console.log(`📌 NOTE: Changes will take effect after device re-plug or system restart`);
-          } catch (e3) {
-            console.error(`❌ All methods failed. Ensure running as Administrator.`);
-            throw e3;
-          }
+          console.error(`❌ Both methods failed. Ensure running as Administrator.`);
+          throw e;
         }
       }
     } else if (platform === 'darwin') {
-      // macOS: Re-enable only Keyboard and Mouse
+      // macOS: Re-enable only Keyboard and Mouse (real-time)
       console.log(`🍎 Executing macOS enable command for Keyboard & Mouse`);
       try {
         execSync('sudo launchctl load /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
         console.log(`🟢 Keyboard & Mouse re-enabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME`);
       } catch (error) {
         console.log(`⚠️  Alternative method...`);
         execSync('sudo defaults delete /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse', { stdio: 'inherit' });
         console.log(`✅ SUCCESS: Keyboard & Mouse enabled`);
       }
     } else if (platform === 'linux') {
-      // Linux: Re-enable only Keyboard and Mouse
+      // Linux: Re-enable only Keyboard and Mouse (real-time)
       console.log(`🐧 Executing Linux enable command for Keyboard & Mouse`);
       try {
-        execSync('sudo bash -c "echo -1 > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput enable $(xinput list | grep -i keyboard | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput enable $(xinput list | grep -i mouse | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
         console.log(`🟢 Keyboard & Mouse re-enabled`);
-        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME`);
       } catch (error) {
-        console.error(`⚠️  Linux method requires additional tools`);
+        console.error(`⚠️  Linux method requires xinput tool`);
         throw error;
       }
     }

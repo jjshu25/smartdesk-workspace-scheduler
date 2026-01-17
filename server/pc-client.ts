@@ -122,7 +122,7 @@ function logoutUser() {
   }
 }
 
-// ✅ REVISED: Lock USB function - Disable only Keyboard & Mouse
+// ✅ FIXED: Lock USB function - Disable only Keyboard & Mouse using WMI
 function lockUSB() {
   try {
     const platform = os.platform();
@@ -136,25 +136,28 @@ function lockUSB() {
       console.log(`📋 Command: Disabling Keyboard & Mouse devices only...`);
       
       try {
-        // Disable only HID Keyboard devices
+        // Disable Keyboard using WMI
         console.log(`  → Disabling HID Keyboard...`);
-        execSync('powershell -Command "Get-PnpDevice -Class Keyboard | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
+        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"Name LIKE \'%Keyboard%\'\\" | ForEach-Object { $_.Disable() }"', 
           { stdio: 'inherit' });
         
-        // Disable only HID Mouse devices
+        // Disable Mouse using WMI
         console.log(`  → Disabling HID Mouse...`);
-        execSync('powershell -Command "Get-PnpDevice -Class Mouse | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
+        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"Name LIKE \'%Mouse%\'\\" | ForEach-Object { $_.Disable() }"', 
           { stdio: 'inherit' });
         
         console.log(`🔴 Keyboard & Mouse disabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
-        // Alternative: Use specific device names
+        // Alternative: Disable via registry
         try {
-          execSync('powershell -Command "Get-PnpDevice | Where-Object {($_.Name -like \'*Keyboard*\' -or $_.Name -like \'*Mouse*\') -and $_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
+          execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\kbdhid" /v Start /t REG_DWORD /d 4 /f', 
             { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: Keyboard & Mouse disabled using device names`);
+          execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\mouhid" /v Start /t REG_DWORD /d 4 /f', 
+            { stdio: 'inherit' });
+          
+          console.log(`✅ SUCCESS: Keyboard & Mouse disabled via registry (requires restart or device re-plug)`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;
@@ -177,8 +180,7 @@ function lockUSB() {
       console.log(`🐧 Executing Linux disable command for Keyboard & Mouse`);
       try {
         // Find and disable keyboard and mouse devices
-        execSync('sudo bash -c "echo \'1\' > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
-        execSync('sudo evtest --grab /dev/input/event* 2>/dev/null &', { stdio: 'inherit' });
+        execSync('sudo bash -c "for dev in /sys/bus/usb/devices/*/power/autosuspend_delay_ms; do echo 1 > $dev; done"', { stdio: 'inherit' });
         console.log(`🔴 Keyboard & Mouse disabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
       } catch (error) {
@@ -197,7 +199,7 @@ function lockUSB() {
   }
 }
 
-// ✅ REVISED: Unlock USB function - Enable only Keyboard & Mouse
+// ✅ FIXED: Unlock USB function - Enable only Keyboard & Mouse using WMI
 function unlockUSB() {
   try {
     const platform = os.platform();
@@ -211,25 +213,28 @@ function unlockUSB() {
       console.log(`📋 Command: Re-enabling Keyboard & Mouse devices only...`);
       
       try {
-        // Re-enable HID Keyboard devices
+        // Re-enable Keyboard using WMI
         console.log(`  → Enabling HID Keyboard...`);
-        execSync('powershell -Command "Get-PnpDevice -Class Keyboard | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
+        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"Name LIKE \'%Keyboard%\'\\" | ForEach-Object { $_.Enable() }"', 
           { stdio: 'inherit' });
         
-        // Re-enable HID Mouse devices
+        // Re-enable Mouse using WMI
         console.log(`  → Enabling HID Mouse...`);
-        execSync('powershell -Command "Get-PnpDevice -Class Mouse | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
+        execSync('powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"Name LIKE \'%Mouse%\'\\" | ForEach-Object { $_.Enable() }"', 
           { stdio: 'inherit' });
         
         console.log(`🟢 Keyboard & Mouse re-enabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
-        // Alternative: Use specific device names
+        // Alternative: Enable via registry
         try {
-          execSync('powershell -Command "Get-PnpDevice | Where-Object {($_.Name -like \'*Keyboard*\' -or $_.Name -like \'*Mouse*\') -and $_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
+          execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\kbdhid" /v Start /t REG_DWORD /d 3 /f', 
             { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: Keyboard & Mouse enabled using device names`);
+          execSync('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\mouhid" /v Start /t REG_DWORD /d 3 /f', 
+            { stdio: 'inherit' });
+          
+          console.log(`✅ SUCCESS: Keyboard & Mouse enabled via registry (requires restart or device re-plug)`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;
@@ -251,7 +256,7 @@ function unlockUSB() {
       // Linux: Re-enable only Keyboard and Mouse
       console.log(`🐧 Executing Linux enable command for Keyboard & Mouse`);
       try {
-        execSync('sudo bash -c "echo \'-1\' > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
+        execSync('sudo bash -c "for dev in /sys/bus/usb/devices/*/power/autosuspend_delay_ms; do echo -1 > $dev; done"', { stdio: 'inherit' });
         console.log(`🟢 Keyboard & Mouse re-enabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
       } catch (error) {

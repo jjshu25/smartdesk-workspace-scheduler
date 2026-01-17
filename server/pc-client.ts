@@ -11,7 +11,7 @@ const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {});
 
-const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://localhost:5000';
+const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://10.192.184.220:5000';
 
 let metricsInterval: NodeJS.Timeout | null = null;
 let mainSocket: any = null;
@@ -122,111 +122,148 @@ function logoutUser() {
   }
 }
 
-// ✅ FIXED: Lock USB function
+// ✅ REVISED: Lock USB function - Disable only Keyboard & Mouse
 function lockUSB() {
   try {
     const platform = os.platform();
     
-    console.log(`📌 ACTION: Disabling USB Hub (Keyboard, Mouse, USB Devices)`);
+    console.log(`📌 ACTION: Disabling Keyboard & Mouse Only`);
     console.log(`⏳ Status: In Progress...`);
     
     if (platform === 'win32') {
-      // Windows: Disable USB devices using PowerShell
+      // Windows: Disable only Keyboard and Mouse
       console.log(`🪟 Executing Windows USB disable command`);
-      console.log(`📋 Command: Disabling all USB Human Input Devices...`);
+      console.log(`📋 Command: Disabling Keyboard & Mouse devices only...`);
       
       try {
-        // Corrected PowerShell command - use -Name instead of -InstanceName
-        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
+        // Disable only HID Keyboard devices
+        console.log(`  → Disabling HID Keyboard...`);
+        execSync('powershell -Command "Get-PnpDevice -Class Keyboard | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
           { stdio: 'inherit' });
         
-        console.log(`🔴 USB devices disabled (keyboard, mouse, USB devices)`);
-        console.log(`✅ SUCCESS: USB Hub locked`);
+        // Disable only HID Mouse devices
+        console.log(`  → Disabling HID Mouse...`);
+        execSync('powershell -Command "Get-PnpDevice -Class Mouse | Where-Object {$_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
+          { stdio: 'inherit' });
+        
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
-        // Alternative: Use Get-PnpDevice with different approach
+        // Alternative: Use specific device names
         try {
-          execSync('powershell -Command "Get-PnpDevice -Class HIDClass -Status OK | ForEach-Object { pnputil /disable-device \\\"$($_.InstanceId)\\\" }"', 
+          execSync('powershell -Command "Get-PnpDevice | Where-Object {($_.Name -like \'*Keyboard*\' -or $_.Name -like \'*Mouse*\') -and $_.Status -eq \'OK\'} | Disable-PnpDevice -Confirm:$false"', 
             { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: USB devices disabled using pnputil`);
+          console.log(`✅ SUCCESS: Keyboard & Mouse disabled using device names`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;
         }
       }
     } else if (platform === 'darwin') {
-      // macOS: Disable USB devices
-      console.log(`🍎 Executing macOS USB disable command`);
-      execSync('sudo launchctl unload /System/Library/LaunchDaemons/com.apple.usbmuxd.plist', { stdio: 'inherit' });
-      console.log(`🔴 USB devices disabled (keyboard, mouse, USB devices)`);
-      console.log(`✅ SUCCESS: USB Hub locked`);
+      // macOS: Disable only Keyboard and Mouse
+      console.log(`🍎 Executing macOS disable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo launchctl unload /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
+      } catch (error) {
+        console.log(`⚠️  Alternative method...`);
+        execSync('sudo defaults write /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse -bool true', { stdio: 'inherit' });
+        console.log(`✅ SUCCESS: Keyboard & Mouse disabled`);
+      }
     } else if (platform === 'linux') {
-      // Linux: Disable USB devices
-      console.log(`🐧 Executing Linux USB disable command`);
-      execSync('echo "0" | sudo tee /sys/bus/usb/devices/usb*/power/autosuspend_delay_ms', { stdio: 'inherit' });
-      console.log(`🔴 USB devices disabled (keyboard, mouse, USB devices)`);
-      console.log(`✅ SUCCESS: USB Hub locked`);
+      // Linux: Disable only Keyboard and Mouse
+      console.log(`🐧 Executing Linux disable command for Keyboard & Mouse`);
+      try {
+        // Find and disable keyboard and mouse devices
+        execSync('sudo bash -c "echo \'1\' > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
+        execSync('sudo evtest --grab /dev/input/event* 2>/dev/null &', { stdio: 'inherit' });
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked (other USB devices remain active)`);
+      } catch (error) {
+        console.error(`⚠️  Linux method requires additional tools`);
+        throw error;
+      }
     }
     
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'lock-usb', status: 'success' });
   } catch (error) {
-    console.error(`❌ FAILED: USB lock failed`);
+    console.error(`❌ FAILED: Keyboard & Mouse lock failed`);
     console.error(`📋 Error Details: ${error}`);
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'lock-usb', status: 'failed', error });
   }
 }
 
-// ✅ FIXED: Unlock USB function
+// ✅ REVISED: Unlock USB function - Enable only Keyboard & Mouse
 function unlockUSB() {
   try {
     const platform = os.platform();
     
-    console.log(`📌 ACTION: Re-enabling USB Hub (Keyboard, Mouse, USB Devices)`);
+    console.log(`📌 ACTION: Re-enabling Keyboard & Mouse`);
     console.log(`⏳ Status: In Progress...`);
     
     if (platform === 'win32') {
-      // Windows: Re-enable USB devices
+      // Windows: Re-enable only Keyboard and Mouse
       console.log(`🪟 Executing Windows USB enable command`);
-      console.log(`📋 Command: Re-enabling all USB Human Input Devices...`);
+      console.log(`📋 Command: Re-enabling Keyboard & Mouse devices only...`);
       
       try {
-        // Corrected PowerShell command for re-enabling
-        execSync('powershell -Command "Get-PnpDevice -Class HIDClass | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
+        // Re-enable HID Keyboard devices
+        console.log(`  → Enabling HID Keyboard...`);
+        execSync('powershell -Command "Get-PnpDevice -Class Keyboard | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
           { stdio: 'inherit' });
         
-        console.log(`🟢 USB devices re-enabled (keyboard, mouse, USB devices)`);
-        console.log(`✅ SUCCESS: USB Hub unlocked`);
+        // Re-enable HID Mouse devices
+        console.log(`  → Enabling HID Mouse...`);
+        execSync('powershell -Command "Get-PnpDevice -Class Mouse | Where-Object {$_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
+          { stdio: 'inherit' });
+        
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
       } catch (error) {
         console.log(`⚠️  Note: Requires admin privileges. Attempting alternative method...`);
+        // Alternative: Use specific device names
         try {
-          execSync('powershell -Command "Get-PnpDevice -Class HIDClass -Status Error | ForEach-Object { pnputil /enable-device \\\"$($_.InstanceId)\\\" }"', 
+          execSync('powershell -Command "Get-PnpDevice | Where-Object {($_.Name -like \'*Keyboard*\' -or $_.Name -like \'*Mouse*\') -and $_.Status -eq \'Error\'} | Enable-PnpDevice -Confirm:$false"', 
             { stdio: 'inherit' });
-          console.log(`✅ SUCCESS: USB devices enabled using pnputil`);
+          console.log(`✅ SUCCESS: Keyboard & Mouse enabled using device names`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
           throw e;
         }
       }
     } else if (platform === 'darwin') {
-      // macOS: Re-enable USB devices
-      console.log(`🍎 Executing macOS USB enable command`);
-      execSync('sudo launchctl load /System/Library/LaunchDaemons/com.apple.usbmuxd.plist', { stdio: 'inherit' });
-      console.log(`🟢 USB devices re-enabled (keyboard, mouse, USB devices)`);
-      console.log(`✅ SUCCESS: USB Hub unlocked`);
+      // macOS: Re-enable only Keyboard and Mouse
+      console.log(`🍎 Executing macOS enable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo launchctl load /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
+      } catch (error) {
+        console.log(`⚠️  Alternative method...`);
+        execSync('sudo defaults delete /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse', { stdio: 'inherit' });
+        console.log(`✅ SUCCESS: Keyboard & Mouse enabled`);
+      }
     } else if (platform === 'linux') {
-      // Linux: Re-enable USB devices
-      console.log(`🐧 Executing Linux USB enable command`);
-      execSync('echo "-1" | sudo tee /sys/bus/usb/devices/usb*/power/autosuspend_delay_ms', { stdio: 'inherit' });
-      console.log(`🟢 USB devices re-enabled (keyboard, mouse, USB devices)`);
-      console.log(`✅ SUCCESS: USB Hub unlocked`);
+      // Linux: Re-enable only Keyboard and Mouse
+      console.log(`🐧 Executing Linux enable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo bash -c "echo \'-1\' > /sys/bus/usb/devices/*/power/autosuspend_delay_ms"', { stdio: 'inherit' });
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked`);
+      } catch (error) {
+        console.error(`⚠️  Linux method requires additional tools`);
+        throw error;
+      }
     }
     
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'unlock-usb', status: 'success' });
   } catch (error) {
-    console.error(`❌ FAILED: USB unlock failed`);
+    console.error(`❌ FAILED: Keyboard & Mouse unlock failed`);
     console.error(`📋 Error Details: ${error}`);
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'unlock-usb', status: 'failed', error });

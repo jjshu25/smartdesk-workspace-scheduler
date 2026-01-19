@@ -54,11 +54,22 @@ interface ConnectedPC {
   currentUser?: string;
   sessionStartTime?: Date;
   lastActive: Date;
+  lastDisconnected?: Date;
   bootTime?: Date;
   autoDetected: boolean;
 }
 
 const connectedPCs = new Map<string, ConnectedPC>();
+
+// ✅ NEW: Track timer state for each PC
+interface PCTimer {
+  active: boolean;
+  timeRemaining: number;
+  startTime: Date;
+  totalDuration: number;
+}
+
+const pcTimers = new Map<string, PCTimer>();
 
 // Helper function to get local IP
 function getLocalIP(): string {
@@ -121,6 +132,37 @@ io.on('connection', (socket) => {
     io.emit('pc-list-updated', Array.from(connectedPCs.values()));
   });
 
+  // ✅ NEW: Handle PC resume on reconnection
+  socket.on('pc-resume', (data: { pcId: string; timestamp: Date }) => {
+    const pc = connectedPCs.get(data.pcId);
+    
+    if (pc) {
+      console.log(`\n🔄 PC RESUMING CONNECTION`);
+      console.log(`   PC ID: ${data.pcId}`);
+      console.log(`   PC Name: ${pc.name}`);
+      console.log(`   Previous Status: ${pc.status}`);
+      console.log(`   Was Offline Since: ${pc.lastDisconnected}`);
+      
+      // Update socket ID and status
+      pc.socketId = socket.id;
+      pc.status = 'online';
+      pc.lastActive = new Date();
+      pc.lastDisconnected = undefined;
+      
+      socket.join(`pc-${data.pcId}`);
+      
+      console.log(`   New Status: ONLINE ✅\n`);
+      
+      // Broadcast updated PC list to dashboards
+      io.emit('pc-list-updated', Array.from(connectedPCs.values()));
+      io.emit('pc-updated', pc);
+    } else {
+      console.log(`⚠️  PC Resume failed: ${data.pcId} not found in registry`);
+      // If PC doesn't exist, treat as new registration
+      socket.emit('pc-registration-required', { message: 'PC needs to register again' });
+    }
+  });
+
   // Manual PC registration (fallback)
   socket.on('pc-register', (data: { pcId?: string; name: string; location: string; ipAddress?: string }) => {
     const pcId = data.pcId || generatePCId();
@@ -160,6 +202,11 @@ io.on('connection', (socket) => {
       pc.memoryUsage = data.memoryUsage;
       pc.diskUsage = data.diskUsage;
       pc.lastActive = new Date();
+      // ✅ CHANGED: Ensure status stays 'online' when receiving metrics
+      if (pc.status === 'offline') {
+        pc.status = 'online';
+        console.log(`🟢 PC came back online: ${pc.name}`);
+      }
       io.emit('pc-updated', pc);
     }
   });
@@ -204,6 +251,49 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ✅ NEW: Listen for timer updates from PC
+  socket.on('timer-tick', (data: { pcId: string; timeRemaining: number; totalDuration: number }) => {
+    const pc = connectedPCs.get(data.pcId);
+    if (pc) {
+      // Update server-side timer tracking
+      pcTimers.set(data.pcId, {
+        active: true,
+        timeRemaining: data.timeRemaining,
+        startTime: new Date(Date.now() - (data.totalDuration * 1000)),
+        totalDuration: data.totalDuration,
+      });
+
+      // Broadcast timer update to all dashboards
+      io.emit('pc-timer-updated', {
+        pcId: data.pcId,
+        timeRemaining: data.timeRemaining,
+        active: true,
+      });
+    }
+  });
+
+  // ✅ NEW: Listen for timer stop from PC
+  socket.on('timer-stopped', (data: { pcId: string }) => {
+    const pc = connectedPCs.get(data.pcId);
+    if (pc) {
+      pcTimers.delete(data.pcId);
+      
+      // Update PC status back to online if timer was in-use
+      if (pc.status === 'in-use') {
+        pc.status = 'online';
+      }
+
+      // Broadcast timer stop to all dashboards
+      io.emit('pc-timer-updated', {
+        pcId: data.pcId,
+        timeRemaining: 0,
+        active: false,
+      });
+
+      io.emit('pc-updated', pc);
+    }
+  });
+
   socket.on('disconnect', () => {
     let disconnectedPC: string | null = null;
     connectedPCs.forEach((pc, key) => {
@@ -214,9 +304,16 @@ io.on('connection', (socket) => {
 
     if (disconnectedPC) {
       const pc = connectedPCs.get(disconnectedPC);
-      connectedPCs.delete(disconnectedPC);
-      io.emit('pc-list-updated', Array.from(connectedPCs.values()));
-      console.log(`❌ PC Disconnected: ${pc?.name}`);
+      if (pc) {
+        pc.status = 'offline';
+        pc.lastDisconnected = new Date();
+        pcTimers.delete(disconnectedPC); // ✅ NEW: Clear timer if PC disconnects
+        console.log(`⚠️  PC Disconnected (Offline): ${pc.name}`);
+        console.log(`   Will stay in dashboard until it reconnects or times out`);
+        
+        io.emit('pc-list-updated', Array.from(connectedPCs.values()));
+        io.emit('pc-updated', pc);
+      }
     }
   });
 
@@ -315,6 +412,118 @@ app.get('/', (req: Request, res: Response) => {
 
 // Handle OPTIONS requests
 app.options('*', cors());
+
+// ✅ UPDATED: Start timer for PC via server relay
+app.post('/api/pc/:pcId/timer/start', (req: Request, res: Response) => {
+  const { pcId } = req.params;
+  const { duration, userName } = req.body;
+
+  const pc = connectedPCs.get(pcId);
+  if (!pc) {
+    console.error(`❌ Timer Start Failed: PC ${pcId} not found`);
+    return res.status(404).json({ error: 'PC not found' });
+  }
+
+  // ✅ FIX: Validate duration properly
+  const validDuration = Math.max(parseInt(String(duration), 10), 1);
+  
+  if (!validDuration || validDuration <= 0) {
+    return res.status(400).json({ error: 'Invalid duration - must be greater than 0' });
+  }
+
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`⏱️  TIMER START REQUEST (via Server)`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`🖥️  PC: ${pc.name} (${pcId})`);
+  console.log(`📍 Location: ${pc.location}`);
+  console.log(`🌐 IP: ${pc.ipAddress}`);
+  console.log(`⏳ Duration: ${validDuration} seconds`); // ✅ Log actual duration
+  console.log(`⏳ Formatted: ${formatTime(validDuration)}`); // ✅ Log formatted time
+  console.log(`👤 User: ${userName}`);
+  console.log(`📊 PC Status: ${pc.status}`);
+  console.log(`${'='.repeat(60)}\n`);
+
+  // Send start-timer event to PC via Socket.IO
+  io.to(`pc-${pcId}`).emit('start-timer', {
+    pcId: pcId,
+    duration: validDuration, // ✅ Send validated duration
+    userName: userName || 'Unknown',
+  });
+
+  console.log(`📡 Timer start command emitted to PC with ${validDuration}s duration\n`);
+
+  res.json({
+    success: true,
+    message: `Timer started on ${pc.name} for ${validDuration} seconds`,
+    pcId: pcId,
+    pcName: pc.name,
+    duration: validDuration,
+    formattedDuration: formatTime(validDuration),
+  });
+});
+
+// Helper function to format time (add to server.ts if not present)
+function formatTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+// ✅ NEW: Stop timer for PC via server relay
+app.post('/api/pc/:pcId/timer/stop', (req: Request, res: Response) => {
+  const { pcId } = req.params;
+  const { userName } = req.body;
+
+  const pc = connectedPCs.get(pcId);
+  if (!pc) {
+    console.error(`❌ Timer Stop Failed: PC ${pcId} not found`);
+    return res.status(404).json({ error: 'PC not found' });
+  }
+
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`⏹️  TIMER STOP REQUEST (via Server)`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`🖥️  PC: ${pc.name} (${pcId})`);
+  console.log(`📍 Location: ${pc.location}`);
+  console.log(`👤 Stopped by: ${userName || 'Admin'}`);
+  console.log(`${'='.repeat(60)}\n`);
+
+  // Send stop-timer event to PC via Socket.IO
+  io.to(`pc-${pcId}`).emit('stop-timer', {
+    pcId: pcId,
+    userName: userName || 'Admin',
+  });
+
+  console.log(`📡 Timer stop command emitted to PC\n`);
+
+  res.json({
+    success: true,
+    message: `Timer stopped on ${pc.name}`,
+    pcId: pcId,
+    pcName: pc.name,
+  });
+});
+
+// ✅ UPDATED: Get timer status for PC from server tracking
+app.get('/api/pc/:pcId/timer/status', (req: Request, res: Response) => {
+  const { pcId } = req.params;
+
+  const pc = connectedPCs.get(pcId);
+  if (!pc) {
+    return res.status(404).json({ error: 'PC not found' });
+  }
+
+  const timerData = pcTimers.get(pcId);
+
+  res.json({
+    success: true,
+    pcId: pcId,
+    active: timerData?.active || false,
+    timeRemaining: timerData?.timeRemaining || 0,
+    totalDuration: timerData?.totalDuration || 0,
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {

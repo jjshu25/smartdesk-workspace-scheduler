@@ -5,16 +5,212 @@ import { io as ioClient } from 'socket.io-client';
 import si from 'systeminformation';
 import os from 'os';
 import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {});
 
-const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://10.192.184.220:5000';
+const SERVER_URL = process.env.MAIN_SERVER_URL || 'http://localhost:5000';
+
+// ✅ NEW: Store PC ID in a local config file
+const CONFIG_DIR = path.join(process.env.APPDATA || process.env.HOME || '.', '.smartdesk');
+const PC_ID_FILE = path.join(CONFIG_DIR, 'pc-id.json');
 
 let metricsInterval: NodeJS.Timeout | null = null;
 let mainSocket: any = null;
+let pcId: string | null = null;
+let isConnected: boolean = false;
+let connectionAttempts: number = 0;
+
+// ✅ NEW: Timer state variables
+let timerActive: boolean = false;
+let timerStartTime: Date | null = null;
+let timerDuration: number = 0; // in seconds
+let timerInterval: NodeJS.Timeout | null = null;
+let sessionStartTime: Date | null = null;
+
+// ✅ NEW: Initialize config directory and load stored PC ID
+function initializeConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+      console.log(`📁 Created config directory: ${CONFIG_DIR}`);
+    }
+
+    if (fs.existsSync(PC_ID_FILE)) {
+      const data = fs.readFileSync(PC_ID_FILE, 'utf-8');
+      const config = JSON.parse(data);
+      pcId = config.pcId;
+      console.log(`✅ Loaded stored PC ID: ${pcId}`);
+    }
+  } catch (error) {
+    console.error(`⚠️  Failed to load config: ${error}`);
+  }
+}
+
+// ✅ NEW: Save PC ID to local file
+function savePCId(id: string) {
+  try {
+    const config = { pcId: id, registeredAt: new Date() };
+    fs.writeFileSync(PC_ID_FILE, JSON.stringify(config, null, 2));
+    console.log(`💾 Saved PC ID: ${id}`);
+  } catch (error) {
+    console.error(`⚠️  Failed to save PC ID: ${error}`);
+  }
+}
+
+// ✅ NEW: Start timer function
+function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
+  try {
+    // ✅ FIX: Validate and ensure durationInSeconds is a valid number
+    const validDuration = Math.max(parseInt(String(durationInSeconds), 10), 1);
+    
+    if (timerActive) {
+      console.log(`⚠️  Timer already running! Duration remaining: ${timerDuration}s`);
+      return;
+    }
+
+    timerActive = true;
+    timerStartTime = new Date();
+    timerDuration = validDuration; // ✅ Use validated duration
+    sessionStartTime = new Date();
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`⏱️  TIMER STARTED`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`⏰ Start Time: ${timerStartTime.toLocaleTimeString()}`);
+    console.log(`👤 User: ${userName}`);
+    console.log(`⏳ Duration: ${formatTime(timerDuration)}`);
+    console.log(`⏳ Duration (seconds): ${timerDuration}s`); // ✅ Log actual seconds
+    console.log(`${'='.repeat(60)}\n`);
+
+    // Update PC status to "in-use"
+    if (mainSocket && mainSocket.connected) {
+      mainSocket.emit('session-start', {
+        pcId: pcId,
+        userName: userName,
+        startTime: timerStartTime.toISOString(),
+        duration: validDuration, // ✅ Send actual duration
+      });
+      console.log(`📡 Session start notification sent to server with ${validDuration}s duration`);
+    }
+
+    // Update timer every second
+    timerInterval = setInterval(() => {
+      timerDuration--;
+
+      if (timerDuration <= 0) {
+        stopTimer(userName);
+        return;
+      }
+
+      // Log remaining time every 10 seconds or when less than 30 seconds
+      if (timerDuration % 10 === 0 || timerDuration <= 30) {
+        console.log(`⏳ Time remaining: ${formatTime(timerDuration)}`);
+      }
+
+      // ✅ UPDATED: Emit timer update to server
+      if (mainSocket && mainSocket.connected) {
+        mainSocket.emit('timer-tick', {
+          pcId: pcId,
+          timeRemaining: timerDuration,
+          totalDuration: Math.floor((new Date().getTime() - sessionStartTime!.getTime()) / 1000),
+        });
+      }
+    }, 1000);
+  } catch (error) {
+    console.error(`❌ Failed to start timer: ${error}`);
+  }
+}
+
+// ✅ UPDATED: Stop timer function
+function stopTimer(userName: string = 'Unknown') {
+  try {
+    if (!timerActive) {
+      console.log(`⚠️  No active timer to stop`);
+      return;
+    }
+
+    const endTime = new Date();
+    const sessionDuration = endTime.getTime() - (sessionStartTime?.getTime() || 0);
+    const totalUsedTime = formatTime(Math.floor(sessionDuration / 1000));
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`⏹️  TIMER STOPPED`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`⏰ End Time: ${endTime.toLocaleTimeString()}`);
+    console.log(`👤 User: ${userName}`);
+    console.log(`⏱️  Total Session Duration: ${totalUsedTime}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    // Clear the timer interval
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+
+    // Reset timer variables
+    timerActive = false;
+    timerStartTime = null;
+    timerDuration = 0;
+
+    // Update PC status back to "online"
+    if (mainSocket && mainSocket.connected) {
+      mainSocket.emit('session-end', {
+        pcId: pcId,
+        userName: userName,
+        sessionDuration: sessionDuration,
+        endTime: endTime.toISOString(),
+      });
+      
+      // ✅ NEW: Emit timer stopped event
+      mainSocket.emit('timer-stopped', {
+        pcId: pcId,
+      });
+      
+      console.log(`📡 Session end notification sent to server`);
+    }
+
+    sessionStartTime = null;
+  } catch (error) {
+    console.error(`❌ Failed to stop timer: ${error}`);
+  }
+}
+
+// ✅ NEW: Format time helper
+function formatTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  const parts = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+  return parts.join(' ');
+}
+
+// ✅ NEW: Get timer status
+function getTimerStatus() {
+  if (!timerActive) {
+    return {
+      active: false,
+      timeRemaining: 0,
+      elapsedTime: 0,
+    };
+  }
+
+  return {
+    active: true,
+    timeRemaining: timerDuration,
+    elapsedTime: sessionStartTime ? Math.floor((new Date().getTime() - sessionStartTime.getTime()) / 1000) : 0,
+    startTime: timerStartTime?.toISOString(),
+  };
+}
 
 // Connect to main server
 function connectToMainServer() {
@@ -22,24 +218,61 @@ function connectToMainServer() {
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: Infinity,
   });
 
   mainSocket.on('connect', () => {
     console.log('✓ Connected to main server');
-    
-    mainSocket.emit('pc-auto-register', {
-      name: process.env.PC_NAME || `PC-${os.hostname()}`,
-      location: process.env.PC_LOCATION || 'Auto-detected',
-    });
+    isConnected = true;
+    connectionAttempts = 0;
+
+    if (pcId) {
+      console.log(`🔄 Resuming PC session: ${pcId}`);
+      mainSocket.emit('pc-resume', {
+        pcId: pcId,
+        timestamp: new Date(),
+      });
+      startMetricsCollection(pcId);
+    } else {
+      console.log(`🆕 First time connection - registering PC`);
+      mainSocket.emit('pc-auto-register', {
+        name: process.env.PC_NAME || `PC-${os.hostname()}`,
+        location: process.env.PC_LOCATION || 'Auto-detected',
+      });
+    }
   });
 
   mainSocket.on('pc-registered', (data: any) => {
     console.log(`✅ PC registered: ${data.pcId}`);
+    pcId = data.pcId;
+    savePCId(pcId);
     startMetricsCollection(data.pcId);
   });
 
-  // Listen for commands from server
+  // ✅ NEW: Listen for timer start command from server
+  mainSocket.on('start-timer', (data: { pcId: string; duration: number; userName: string }) => {
+    console.log(`🎯 Received start-timer command`);
+    if (data.pcId === pcId) {
+      startTimer(data.duration, data.userName);
+    }
+  });
+
+  // ✅ NEW: Listen for timer stop command from server
+  mainSocket.on('stop-timer', (data: { pcId: string; userName?: string }) => {
+    console.log(`🎯 Received stop-timer command`);
+    if (data.pcId === pcId && timerActive) {
+      stopTimer(data.userName || 'Admin');
+    }
+  });
+
+  // ✅ NEW: Listen for timer status request
+  mainSocket.on('get-timer-status', (data: { pcId: string }) => {
+    if (data.pcId === pcId) {
+      const status = getTimerStatus();
+      mainSocket.emit('timer-status-response', { pcId: pcId, ...status });
+    }
+  });
+
   mainSocket.on('execute-command', (data: { command: string; params?: any }) => {
     console.log(`🎯 Received command: ${data.command}`);
     handleCommand(data.command, data.params);
@@ -47,7 +280,36 @@ function connectToMainServer() {
 
   mainSocket.on('disconnect', () => {
     console.log('❌ Disconnected from main server');
-    if (metricsInterval) clearInterval(metricsInterval);
+    isConnected = false;
+    connectionAttempts++;
+
+    if (metricsInterval) {
+      console.log(`⏸️  Pausing metrics emission (will resume on reconnect)`);
+    }
+  });
+
+  mainSocket.on('reconnect_attempt', () => {
+    console.log(`🔄 Reconnection attempt #${connectionAttempts}...`);
+  });
+
+  mainSocket.on('reconnect_failed', () => {
+    console.log(`❌ Failed to reconnect to main server. Retrying...`);
+  });
+
+  mainSocket.on('pc-registration-required', () => {
+    console.log(`⚠️  Server says PC needs to register again. Clearing stored ID and re-registering...`);
+    pcId = null;
+    try {
+      if (fs.existsSync(PC_ID_FILE)) {
+        fs.unlinkSync(PC_ID_FILE);
+      }
+    } catch (error) {
+      console.error(`Failed to delete old PC ID file: ${error}`);
+    }
+    mainSocket.emit('pc-auto-register', {
+      name: process.env.PC_NAME || `PC-${os.hostname()}`,
+      location: process.env.PC_LOCATION || 'Auto-detected',
+    });
   });
 }
 
@@ -68,6 +330,12 @@ function handleCommand(command: string, params?: any) {
       case 'logout':
         logoutUser();
         break;
+      case 'lock-usb':
+        lockUSB();
+        break;
+      case 'unlock-usb':
+        unlockUSB();
+        break;
       case 'restart':
         restartPC();
         break;
@@ -82,7 +350,7 @@ function handleCommand(command: string, params?: any) {
   }
 }
 
-// Logout function
+// Logout function - FIXED
 function logoutUser() {
   try {
     const platform = os.platform();
@@ -91,9 +359,10 @@ function logoutUser() {
     console.log(`⏳ Status: In Progress...`);
     
     if (platform === 'win32') {
-      console.log(`🪟 Executing Windows logout command: shutdown /l /t 0`);
+      console.log(`🪟 Executing Windows logout command: shutdown /l /f`);
       console.log('👤 Logging out user from Windows...');
-      execSync('shutdown /l /t 0', { stdio: 'inherit' });
+      // /l = logoff, /f = force close applications
+      execSync('shutdown /l /f', { stdio: 'inherit' });
     } else if (platform === 'darwin') {
       console.log(`🍎 Executing macOS logout command`);
       console.log('👤 Logging out user from macOS...');
@@ -115,7 +384,227 @@ function logoutUser() {
   }
 }
 
-// Restart PC function
+// ✅ FIXED: Lock USB function - Disable only Keyboard & Mouse in REAL-TIME
+function lockUSB() {
+  try {
+    const platform = os.platform();
+    
+    console.log(`📌 ACTION: Disabling Keyboard & Mouse Only`);
+    console.log(`⏳ Status: In Progress...`);
+    
+    if (platform === 'win32') {
+      // Windows: Disable only Keyboard and Mouse
+      console.log(`🪟 Executing Windows USB disable command`);
+      console.log(`📋 Command: Disabling Keyboard & Mouse devices only...`);
+      
+      try {
+        // Method 1: Get device IDs and disable immediately
+        console.log(`  → Finding and disabling HID Keyboard...`);
+        const keyboardDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Keyboard -Status OK | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of keyboardDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Disabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not disable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`  → Finding and disabling HID Mouse...`);
+        const mouseDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Mouse -Status OK | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of mouseDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Disabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not disable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME (no restart needed)`);
+      } catch (error) {
+        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Disable...`);
+        try {
+          // Method 2: Use WMI Disable() method directly
+          // ✅ FIXED: Proper quote escaping for WMI filter
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"',
+            { stdio: 'inherit' }
+          );
+          
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"',
+            { stdio: 'inherit' }
+          );
+          
+          console.log(`✅ SUCCESS: Keyboard & Mouse disabled using WMI (REAL-TIME)`);
+        } catch (e) {
+          console.error(`❌ Both methods failed. Ensure running as Administrator.`);
+          throw e;
+        }
+      }
+    } else if (platform === 'darwin') {
+      // macOS: Disable only Keyboard and Mouse (real-time)
+      console.log(`🍎 Executing macOS disable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo launchctl unload /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME`);
+      } catch (error) {
+        console.log(`⚠️  Alternative method...`);
+        execSync('sudo defaults write /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse -bool true', { stdio: 'inherit' });
+        console.log(`✅ SUCCESS: Keyboard & Mouse disabled`);
+      }
+    } else if (platform === 'linux') {
+      // Linux: Disable only Keyboard and Mouse (real-time)
+      console.log(`🐧 Executing Linux disable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo bash -c "xinput disable $(xinput list | grep -i keyboard | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput disable $(xinput list | grep -i mouse | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        console.log(`🔴 Keyboard & Mouse disabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME`);
+      } catch (error) {
+        console.error(`⚠️  Linux method requires xinput tool`);
+        throw error;
+      }
+    }
+    
+    console.log(`${'='.repeat(60)}\n`);
+    mainSocket.emit('command-executed', { command: 'lock-usb', status: 'success' });
+  } catch (error) {
+    console.error(`❌ FAILED: Keyboard & Mouse lock failed`);
+    console.error(`📋 Error Details: ${error}`);
+    console.log(`${'='.repeat(60)}\n`);
+    mainSocket.emit('command-executed', { command: 'lock-usb', status: 'failed', error });
+  }
+}
+
+// ✅ FIXED: Unlock USB function - Enable only Keyboard & Mouse in REAL-TIME
+function unlockUSB() {
+  try {
+    const platform = os.platform();
+    
+    console.log(`📌 ACTION: Re-enabling Keyboard & Mouse`);
+    console.log(`⏳ Status: In Progress...`);
+    
+    if (platform === 'win32') {
+      // Windows: Re-enable only Keyboard and Mouse
+      console.log(`🪟 Executing Windows USB enable command`);
+      console.log(`📋 Command: Re-enabling Keyboard & Mouse devices only...`);
+      
+      try {
+        // Method 1: Get device IDs and enable immediately
+        console.log(`  → Finding and enabling HID Keyboard...`);
+        const keyboardDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Keyboard -Status Error | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of keyboardDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Enabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not enable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`  → Finding and enabling HID Mouse...`);
+        const mouseDevices = execSync(
+          'powershell -Command "Get-PnpDevice -Class Mouse -Status Error | Select-Object -ExpandProperty InstanceId"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim().split('\n').filter((id: string) => id);
+        
+        for (const deviceId of mouseDevices) {
+          if (deviceId) {
+            try {
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+                { stdio: 'inherit' });
+              console.log(`    ✓ Enabled: ${deviceId}`);
+            } catch (e) {
+              console.log(`    ⚠️  Could not enable: ${deviceId}`);
+            }
+          }
+        }
+        
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME (no restart needed)`);
+      } catch (error) {
+        console.log(`⚠️  Method 1 failed. Attempting Method 2: Using WMI Enable...`);
+        try {
+          // Method 2: Use WMI Enable() method directly
+          // ✅ FIXED: Proper quote escaping for WMI filter
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"',
+            { stdio: 'inherit' }
+          );
+          
+          execSync(
+            'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"',
+            { stdio: 'inherit' }
+          );
+          
+          console.log(`✅ SUCCESS: Keyboard & Mouse enabled using WMI (REAL-TIME)`);
+        } catch (e) {
+          console.error(`❌ Both methods failed. Ensure running as Administrator.`);
+          throw e;
+        }
+      }
+    } else if (platform === 'darwin') {
+      // macOS: Re-enable only Keyboard and Mouse (real-time)
+      console.log(`🍎 Executing macOS enable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo launchctl load /Library/LaunchDaemons/com.apple.iohidevice.plist', { stdio: 'inherit' });
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME`);
+      } catch (error) {
+        console.log(`⚠️  Alternative method...`);
+        execSync('sudo defaults delete /Library/Preferences/com.apple.iohidevice.plist DisableKeyboardAndMouse', { stdio: 'inherit' });
+        console.log(`✅ SUCCESS: Keyboard & Mouse enabled`);
+      }
+    } else if (platform === 'linux') {
+      // Linux: Re-enable only Keyboard and Mouse (real-time)
+      console.log(`🐧 Executing Linux enable command for Keyboard & Mouse`);
+      try {
+        execSync('sudo bash -c "xinput enable $(xinput list | grep -i keyboard | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        execSync('sudo bash -c "xinput enable $(xinput list | grep -i mouse | awk \'{print $7}\' | sed \'s/id=//\')"', { stdio: 'inherit' });
+        console.log(`🟢 Keyboard & Mouse re-enabled`);
+        console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME`);
+      } catch (error) {
+        console.error(`⚠️  Linux method requires xinput tool`);
+        throw error;
+      }
+    }
+    
+    console.log(`${'='.repeat(60)}\n`);
+    mainSocket.emit('command-executed', { command: 'unlock-usb', status: 'success' });
+  } catch (error) {
+    console.error(`❌ FAILED: Keyboard & Mouse unlock failed`);
+    console.error(`📋 Error Details: ${error}`);
+    console.log(`${'='.repeat(60)}\n`);
+    mainSocket.emit('command-executed', { command: 'unlock-usb', status: 'failed', error });
+  }
+}
+
+// Restart PC function - KEPT
 function restartPC() {
   try {
     const platform = os.platform();
@@ -149,7 +638,7 @@ function restartPC() {
   }
 }
 
-// Shutdown PC function
+// Shutdown PC function - KEPT
 function shutdownPC() {
   try {
     const platform = os.platform();
@@ -183,6 +672,96 @@ function shutdownPC() {
   }
 }
 
+// ✅ NEW: Add HTTP endpoints for timer control
+app.use(express.json());
+
+// Start timer endpoint
+app.post('/api/timer/start', (req, res) => {
+  const { duration, userName } = req.body;
+
+  if (!duration || duration <= 0) {
+    return res.status(400).json({ 
+      error: 'Invalid duration', 
+      message: 'Duration must be a positive number in seconds' 
+    });
+  }
+
+  console.log(`\n📍 Timer Start Request Received via HTTP API`);
+  console.log(`   Duration: ${duration} seconds`);
+  console.log(`   User: ${userName || 'Not specified'}`);
+
+  startTimer(duration, userName || 'Unknown');
+
+  res.json({
+    success: true,
+    message: 'Timer started successfully',
+    duration: duration,
+    userName: userName || 'Unknown',
+    startTime: new Date().toISOString(),
+  });
+});
+
+// Stop timer endpoint
+app.post('/api/timer/stop', (req, res) => {
+  const { userName } = req.body;
+
+  if (!timerActive) {
+    return res.status(400).json({ 
+      error: 'No active timer', 
+      message: 'Timer is not currently running' 
+    });
+  }
+
+  console.log(`\n📍 Timer Stop Request Received via HTTP API`);
+  console.log(`   Stopped by: ${userName || 'Unknown'}`);
+
+  stopTimer(userName || 'Admin');
+
+  res.json({
+    success: true,
+    message: 'Timer stopped successfully',
+    userName: userName || 'Admin',
+    stoppedAt: new Date().toISOString(),
+  });
+});
+
+// Get timer status endpoint
+app.get('/api/timer/status', (req, res) => {
+  const status = getTimerStatus();
+
+  res.json({
+    success: true,
+    pcId: pcId,
+    ...status,
+    formattedTimeRemaining: timerActive ? formatTime(timerDuration) : 'No active timer',
+  });
+});
+
+// Get PC info endpoint
+app.get('/api/pc/info', (req, res) => {
+  res.json({
+    pcId: pcId,
+    hostname: os.hostname(),
+    platform: os.platform(),
+    osVersion: os.release(),
+    cpuCores: os.cpus().length,
+    totalMemory: os.totalmem(),
+    isConnected: isConnected,
+    timerActive: timerActive,
+  });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    pcId: pcId,
+    connected: isConnected,
+    timerActive: timerActive,
+    uptime: process.uptime(),
+  });
+});
+
 async function getSystemMetrics() {
   try {
     const cpuLoad = await si.currentLoad();
@@ -202,18 +781,60 @@ async function getSystemMetrics() {
 }
 
 function startMetricsCollection(pcId: string) {
+  if (metricsInterval) {
+    clearInterval(metricsInterval);
+  }
+
   metricsInterval = setInterval(async () => {
-    const metrics = await getSystemMetrics();
-    mainSocket.emit('pc-metrics', { pcId, ...metrics });
-    console.log(`📊 Metrics sent: CPU ${metrics.cpuUsage}% | RAM ${metrics.memoryUsage}% | DISK ${metrics.diskUsage}%`);
+    if (isConnected && mainSocket && mainSocket.connected) {
+      const metrics = await getSystemMetrics();
+      mainSocket.emit('pc-metrics', { pcId, ...metrics });
+      console.log(`📊 Metrics sent: CPU ${metrics.cpuUsage}% | RAM ${metrics.memoryUsage}% | DISK ${metrics.diskUsage}%`);
+    } else {
+      console.log(`⏸️  Metrics collected but not sent (disconnected). Will retry on reconnect.`);
+    }
   }, 5000);
 }
 
-// Start PC client
+// ✅ NEW: Graceful shutdown handler
+function gracefulShutdown() {
+  console.log('\n📴 Shutting down PC Client gracefully...');
+  
+  // Stop timer if active
+  if (timerActive) {
+    stopTimer('System Shutdown');
+  }
+  
+  if (metricsInterval) {
+    clearInterval(metricsInterval);
+  }
+  if (mainSocket) {
+    mainSocket.disconnect();
+  }
+  httpServer.close(() => {
+    console.log('✅ PC Client closed');
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+
+// ✅ NEW: Initialize config and start PC client
+initializeConfig();
 connectToMainServer();
 
 const PORT = process.env.PC_PORT || 5001;
 httpServer.listen(PORT, () => {
   console.log(`🖥️ PC Client running on port ${PORT}`);
-  console.log(`📡 Connecting to main server: ${SERVER_URL}`);
+  console.log(`📡 Connecting to main server: http://localhost:5000`);
+  console.log(`\n✅ Available Endpoints:`);
+  console.log(`   POST   http://localhost:${PORT}/api/timer/start - Start timer`);
+  console.log(`   POST   http://localhost:${PORT}/api/timer/stop - Stop timer`);
+  console.log(`   GET    http://localhost:${PORT}/api/timer/status - Get timer status`);
+  console.log(`   GET    http://localhost:${PORT}/api/pc/info - Get PC info`);
+  console.log(`   GET    http://localhost:${PORT}/api/health - Health check\n`);
+  if (pcId) {
+    console.log(`🔄 Will resume with PC ID: ${pcId}`);
+  }
 });

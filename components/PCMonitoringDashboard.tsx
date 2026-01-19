@@ -218,28 +218,10 @@ const PCMonitoringDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* ✅ UPDATE THESE: Command Buttons */}
+              {/* UPDATED: Command Buttons - Removed Lock USB */}
               <div className="border-t pt-3 space-y-2">
                 <p className="text-xs font-semibold text-gray-600 uppercase">Actions</p>
                 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => sendCommand(pc.id, 'lock-usb')}
-                    className="px-3 py-2 bg-red-500 text-white text-sm rounded hover:bg-red-600 transition-colors font-semibold flex items-center justify-center gap-1"
-                    title="Disable keyboard, mouse, and USB devices"
-                  >
-                    🔒 Lock USB
-                  </button>
-
-                  <button
-                    onClick={() => sendCommand(pc.id, 'unlock-usb')}
-                    className="px-3 py-2 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors font-semibold flex items-center justify-center gap-1"
-                    title="Re-enable keyboard, mouse, and USB devices"
-                  >
-                    🔓 Unlock USB
-                  </button>
-                </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => sendCommand(pc.id, 'logout')}

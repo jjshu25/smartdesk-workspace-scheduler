@@ -1,20 +1,27 @@
 {
-  "name": "copy-of-smartdesk:-a-minimalist-digital-workspace-scheduler",
+  "name": "smartdesk-pc-client",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch server/server.ts",
-    "dev:pc-client": "tsx watch server/pc-client.ts",
-    "dev:full": "concurrently \"npm run dev\" \"npm run dev:server\" \"npm run dev:pc-client\"",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:client": "tsx watch server/pc-client.ts",
+    "dev:electron": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev:react": "vite",
+    "build": "npm run build:react && npm run build:electron",
+    "build:react": "vite build",
+    "build:electron": "tsc --project tsconfig.electron.json && electron-builder",
+    "start:electron": "electron .",
+    "dist": "npm run build && electron-builder --publish=never"
   },
   "dependencies": {
     "@google/genai": "^1.27.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "electron": "^latest",
+    "electron-builder": "^latest",
+    "electron-is-dev": "^latest",
     "express": "^4.18.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -22,14 +29,39 @@
     "socket.io-client": "^4.7.2",
     "systeminformation": "^5.30.3"
   },
+  "build": {
+    "appId": "com.smartdesk.pcclient",
+    "productName": "SmartDesk PC Client",
+    "files": [
+      "dist/**/*",
+      "electron/**/*.js",
+      "server/**/*.js",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "certificateFile": null,
+      "certificatePassword": null,
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SmartDesk PC Client"
+    }
+  },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "concurrently": "^9.2.1",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "concurrently": "^latest",
+    "typescript": "^latest",
+    "wait-on": "^latest"
   }
 }

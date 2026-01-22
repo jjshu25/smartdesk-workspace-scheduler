@@ -7,6 +7,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,10 +63,43 @@ function savePCId(id: string) {
   }
 }
 
-// ✅ NEW: Start timer function
+// ✅ NEW: ESP32 Configuration
+const ESP32_URL = process.env.ESP32_URL || 'http://192.168.5.74';
+const ESP32_TIMER_ENDPOINT = `${ESP32_URL}/api/timer`;
+
+// ✅ NEW: Send timer data to ESP32
+async function sendTimerToESP32(timerData: {
+  pcId: string;
+  pcName: string;
+  timeRemaining: number;
+  totalDuration: number;
+  status: 'started' | 'running' | 'stopped';
+  userName: string;
+  timestamp: string;
+}) {
+  try {
+    if (!mainSocket?.connected) {
+      console.log(`⚠️  Skipping ESP32 sync (server disconnected)`);
+      return;
+    }
+
+    await axios.post(ESP32_TIMER_ENDPOINT, timerData, {
+      timeout: 2000,
+    });
+
+    console.log(`📱 ✅ Timer sent to ESP32: ${timerData.timeRemaining}s remaining`);
+  } catch (error: any) {
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      console.log(`📱 ⚠️  ESP32 unreachable (${ESP32_URL})`);
+    } else {
+      console.error(`📱 ❌ Failed to send timer to ESP32:`, error.message);
+    }
+  }
+}
+
+// ✅ SINGLE startTimer function with ESP32 sync
 function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
   try {
-    // ✅ FIX: Validate and ensure durationInSeconds is a valid number
     const validDuration = Math.max(parseInt(String(durationInSeconds), 10), 1);
     
     if (timerActive) {
@@ -75,7 +109,7 @@ function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
 
     timerActive = true;
     timerStartTime = new Date();
-    timerDuration = validDuration; // ✅ Use validated duration
+    timerDuration = validDuration;
     sessionStartTime = new Date();
 
     console.log(`\n${'='.repeat(60)}`);
@@ -84,21 +118,29 @@ function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
     console.log(`⏰ Start Time: ${timerStartTime.toLocaleTimeString()}`);
     console.log(`👤 User: ${userName}`);
     console.log(`⏳ Duration: ${formatTime(timerDuration)}`);
-    console.log(`⏳ Duration (seconds): ${timerDuration}s`); // ✅ Log actual seconds
+    console.log(`⏳ Duration (seconds): ${timerDuration}s`);
     console.log(`${'='.repeat(60)}\n`);
 
-    // Update PC status to "in-use"
     if (mainSocket && mainSocket.connected) {
       mainSocket.emit('session-start', {
         pcId: pcId,
         userName: userName,
         startTime: timerStartTime.toISOString(),
-        duration: validDuration, // ✅ Send actual duration
+        duration: validDuration,
       });
       console.log(`📡 Session start notification sent to server with ${validDuration}s duration`);
     }
 
-    // Update timer every second
+    sendTimerToESP32({
+      pcId: pcId || 'unknown',
+      pcName: process.env.PC_NAME || `PC-${os.hostname()}`,
+      timeRemaining: validDuration,
+      totalDuration: validDuration,
+      status: 'started',
+      userName: userName,
+      timestamp: new Date().toISOString(),
+    });
+
     timerInterval = setInterval(() => {
       timerDuration--;
 
@@ -107,17 +149,27 @@ function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
         return;
       }
 
-      // Log remaining time every 10 seconds or when less than 30 seconds
       if (timerDuration % 10 === 0 || timerDuration <= 30) {
         console.log(`⏳ Time remaining: ${formatTime(timerDuration)}`);
       }
 
-      // ✅ UPDATED: Emit timer update to server
       if (mainSocket && mainSocket.connected) {
         mainSocket.emit('timer-tick', {
           pcId: pcId,
           timeRemaining: timerDuration,
           totalDuration: Math.floor((new Date().getTime() - sessionStartTime!.getTime()) / 1000),
+        });
+      }
+
+      if (timerDuration % 5 === 0 || timerDuration <= 10) {
+        sendTimerToESP32({
+          pcId: pcId || 'unknown',
+          pcName: process.env.PC_NAME || `PC-${os.hostname()}`,
+          timeRemaining: timerDuration,
+          totalDuration: validDuration,
+          status: 'running',
+          userName: userName,
+          timestamp: new Date().toISOString(),
         });
       }
     }, 1000);
@@ -126,7 +178,7 @@ function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
   }
 }
 
-// ✅ UPDATED: Stop timer function
+// ✅ SINGLE stopTimer function with ESP32 sync
 function stopTimer(userName: string = 'Unknown') {
   try {
     if (!timerActive) {
@@ -146,18 +198,15 @@ function stopTimer(userName: string = 'Unknown') {
     console.log(`⏱️  Total Session Duration: ${totalUsedTime}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    // Clear the timer interval
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
     }
 
-    // Reset timer variables
     timerActive = false;
     timerStartTime = null;
     timerDuration = 0;
 
-    // Update PC status back to "online"
     if (mainSocket && mainSocket.connected) {
       mainSocket.emit('session-end', {
         pcId: pcId,
@@ -166,13 +215,22 @@ function stopTimer(userName: string = 'Unknown') {
         endTime: endTime.toISOString(),
       });
       
-      // ✅ NEW: Emit timer stopped event
       mainSocket.emit('timer-stopped', {
         pcId: pcId,
       });
       
       console.log(`📡 Session end notification sent to server`);
     }
+
+    sendTimerToESP32({
+      pcId: pcId || 'unknown',
+      pcName: process.env.PC_NAME || `PC-${os.hostname()}`,
+      timeRemaining: 0,
+      totalDuration: Math.floor(sessionDuration / 1000),
+      status: 'stopped',
+      userName: userName,
+      timestamp: endTime.toISOString(),
+    });
 
     sessionStartTime = null;
   } catch (error) {
@@ -210,6 +268,60 @@ function getTimerStatus() {
     elapsedTime: sessionStartTime ? Math.floor((new Date().getTime() - sessionStartTime.getTime()) / 1000) : 0,
     startTime: timerStartTime?.toISOString(),
   };
+}
+
+// ✅ NEW: Start collecting and sending metrics
+function startMetricsCollection(registeredPcId: string) {
+  if (metricsInterval) {
+    console.log(`⚠️  Metrics collection already running`);
+    return;
+  }
+
+  console.log(`📊 Starting metrics collection for PC: ${registeredPcId}`);
+
+  metricsInterval = setInterval(async () => {
+    try {
+      if (!mainSocket?.connected) {
+        console.log(`⚠️  Skipping metrics (server disconnected)`);
+        return;
+      }
+
+      // Get CPU usage
+      const cpuUsage = await si.currentLoad();
+      
+      // Get memory usage
+      const mem = await si.mem();
+      const memoryUsage = (mem.used / mem.total) * 100;
+      
+      // Get disk usage
+      const fsSize = await si.fsSize();
+      const totalDisk = fsSize.reduce((sum, disk) => sum + disk.size, 0);
+      const usedDisk = fsSize.reduce((sum, disk) => sum + disk.used, 0);
+      const diskUsage = (usedDisk / totalDisk) * 100;
+
+      // Send metrics to server
+      mainSocket.emit('pc-metrics', {
+        pcId: registeredPcId,
+        cpuUsage: Math.round(cpuUsage.currentLoad * 100) / 100,
+        memoryUsage: Math.round(memoryUsage * 100) / 100,
+        diskUsage: Math.round(diskUsage * 100) / 100,
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log(`📊 Metrics sent: CPU ${Math.round(cpuUsage.currentLoad * 100) / 100}% | RAM ${Math.round(memoryUsage * 100) / 100}% | DISK ${Math.round(diskUsage * 100) / 100}%`);
+    } catch (error) {
+      console.error(`❌ Failed to collect metrics: ${error}`);
+    }
+  }, 5000); // Collect every 5 seconds
+}
+
+// ✅ NEW: Stop metrics collection
+function stopMetricsCollection() {
+  if (metricsInterval) {
+    clearInterval(metricsInterval);
+    metricsInterval = null;
+    console.log(`⏸️  Metrics collection stopped`);
+  }
 }
 
 // Connect to main server
@@ -670,130 +782,6 @@ function shutdownPC() {
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'shutdown', status: 'failed', error });
   }
-}
-
-// ✅ NEW: Add HTTP endpoints for timer control
-app.use(express.json());
-
-// Start timer endpoint
-app.post('/api/timer/start', (req, res) => {
-  const { duration, userName } = req.body;
-
-  if (!duration || duration <= 0) {
-    return res.status(400).json({ 
-      error: 'Invalid duration', 
-      message: 'Duration must be a positive number in seconds' 
-    });
-  }
-
-  console.log(`\n📍 Timer Start Request Received via HTTP API`);
-  console.log(`   Duration: ${duration} seconds`);
-  console.log(`   User: ${userName || 'Not specified'}`);
-
-  startTimer(duration, userName || 'Unknown');
-
-  res.json({
-    success: true,
-    message: 'Timer started successfully',
-    duration: duration,
-    userName: userName || 'Unknown',
-    startTime: new Date().toISOString(),
-  });
-});
-
-// Stop timer endpoint
-app.post('/api/timer/stop', (req, res) => {
-  const { userName } = req.body;
-
-  if (!timerActive) {
-    return res.status(400).json({ 
-      error: 'No active timer', 
-      message: 'Timer is not currently running' 
-    });
-  }
-
-  console.log(`\n📍 Timer Stop Request Received via HTTP API`);
-  console.log(`   Stopped by: ${userName || 'Unknown'}`);
-
-  stopTimer(userName || 'Admin');
-
-  res.json({
-    success: true,
-    message: 'Timer stopped successfully',
-    userName: userName || 'Admin',
-    stoppedAt: new Date().toISOString(),
-  });
-});
-
-// Get timer status endpoint
-app.get('/api/timer/status', (req, res) => {
-  const status = getTimerStatus();
-
-  res.json({
-    success: true,
-    pcId: pcId,
-    ...status,
-    formattedTimeRemaining: timerActive ? formatTime(timerDuration) : 'No active timer',
-  });
-});
-
-// Get PC info endpoint
-app.get('/api/pc/info', (req, res) => {
-  res.json({
-    pcId: pcId,
-    hostname: os.hostname(),
-    platform: os.platform(),
-    osVersion: os.release(),
-    cpuCores: os.cpus().length,
-    totalMemory: os.totalmem(),
-    isConnected: isConnected,
-    timerActive: timerActive,
-  });
-});
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    pcId: pcId,
-    connected: isConnected,
-    timerActive: timerActive,
-    uptime: process.uptime(),
-  });
-});
-
-async function getSystemMetrics() {
-  try {
-    const cpuLoad = await si.currentLoad();
-    const memory = await si.mem();
-    const fsSize = await si.fsSize();
-    const mainDrive = fsSize[0];
-
-    return {
-      cpuUsage: Math.round(cpuLoad.currentLoad * 100) / 100,
-      memoryUsage: Math.round((memory.used / memory.total) * 100 * 100) / 100,
-      diskUsage: mainDrive ? Math.round((mainDrive.used / mainDrive.size) * 100 * 100) / 100 : 0,
-    };
-  } catch (error) {
-    console.error('Failed to get metrics:', error);
-    return { cpuUsage: 0, memoryUsage: 0, diskUsage: 0 };
-  }
-}
-
-function startMetricsCollection(pcId: string) {
-  if (metricsInterval) {
-    clearInterval(metricsInterval);
-  }
-
-  metricsInterval = setInterval(async () => {
-    if (isConnected && mainSocket && mainSocket.connected) {
-      const metrics = await getSystemMetrics();
-      mainSocket.emit('pc-metrics', { pcId, ...metrics });
-      console.log(`📊 Metrics sent: CPU ${metrics.cpuUsage}% | RAM ${metrics.memoryUsage}% | DISK ${metrics.diskUsage}%`);
-    } else {
-      console.log(`⏸️  Metrics collected but not sent (disconnected). Will retry on reconnect.`);
-    }
-  }, 5000);
 }
 
 // ✅ NEW: Graceful shutdown handler

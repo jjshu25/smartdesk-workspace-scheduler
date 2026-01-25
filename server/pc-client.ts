@@ -232,6 +232,17 @@ function stopTimer(userName: string = 'Unknown') {
       timestamp: endTime.toISOString(),
     });
 
+    // ✅ NEW: Auto-logout when timer ends
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🚪 AUTO-LOGOUT INITIATED`);
+    console.log(`⏰ Time: ${endTime.toLocaleTimeString()}`);
+    console.log(`👤 User: ${userName}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    setTimeout(() => {
+      logoutUser();
+    }, 2000); // 2 second delay before logout
+
     sessionStartTime = null;
   } catch (error) {
     console.error(`❌ Failed to stop timer: ${error}`);

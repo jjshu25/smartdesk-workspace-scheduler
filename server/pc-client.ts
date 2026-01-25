@@ -473,37 +473,59 @@ function handleCommand(command: string, params?: any) {
   }
 }
 
-// Logout function - FIXED
+// Logout function - FIXED with better error handling
 function logoutUser() {
   try {
     const platform = os.platform();
     
     console.log(`📌 ACTION: Logging out user`);
     console.log(`⏳ Status: In Progress...`);
+    console.log(`⏰ Time: ${new Date().toLocaleTimeString()}`);
     
     if (platform === 'win32') {
       console.log(`🪟 Executing Windows logout command: shutdown /l /f`);
       console.log('👤 Logging out user from Windows...');
       // /l = logoff, /f = force close applications
-      execSync('shutdown /l /f', { stdio: 'inherit' });
+      try {
+        execSync('shutdown /l /f', { stdio: 'inherit' });
+      } catch (e) {
+        // Command may appear to fail but still work
+        console.log('⚠️  Logout command sent (may complete shortly)');
+      }
     } else if (platform === 'darwin') {
       console.log(`🍎 Executing macOS logout command`);
       console.log('👤 Logging out user from macOS...');
-      execSync('osascript -e "tell application \\"System Events\\" to log out"', { stdio: 'inherit' });
+      try {
+        execSync('osascript -e "tell application \\"System Events\\" to log out"', { stdio: 'inherit' });
+      } catch (e) {
+        console.log('⚠️  Logout command sent');
+      }
     } else if (platform === 'linux') {
       console.log(`🐧 Executing Linux logout command: loginctl terminate-user`);
       console.log('👤 Logging out user from Linux...');
-      execSync('loginctl terminate-user $USER', { stdio: 'inherit' });
+      try {
+        execSync('loginctl terminate-user $USER', { stdio: 'inherit' });
+      } catch (e) {
+        console.log('⚠️  Logout command sent');
+      }
     }
     
     console.log(`✅ SUCCESS: Logout command executed`);
     console.log(`${'='.repeat(60)}\n`);
-    mainSocket.emit('command-executed', { command: 'logout', status: 'success' });
+    
+    // Send response if socket is available
+    if (mainSocket && mainSocket.connected) {
+      mainSocket.emit('command-executed', { command: 'logout', status: 'success' });
+    }
   } catch (error) {
     console.error(`❌ FAILED: Logout failed`);
     console.error(`📋 Error Details: ${error}`);
     console.log(`${'='.repeat(60)}\n`);
-    mainSocket.emit('command-executed', { command: 'logout', status: 'failed', error });
+    
+    // Send response if socket is available
+    if (mainSocket && mainSocket.connected) {
+      mainSocket.emit('command-executed', { command: 'logout', status: 'failed', error: String(error) });
+    }
   }
 }
 

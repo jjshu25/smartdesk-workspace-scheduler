@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import Icon from './Icon';
 
@@ -14,7 +13,6 @@ const Header: React.FC<HeaderProps> = ({ currentView, onViewChange }) => {
 
   const navItems: { id: View; label: string }[] = [
     { id: 'dashboard', label: 'Desk Dashboard' },
-    { id: 'optimizer', label: 'Optimizer' },
     { id: 'history', label: 'History' },
   ];
 

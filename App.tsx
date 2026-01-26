@@ -4,10 +4,10 @@ import PCMonitoringDashboard from './components/PCMonitoringDashboard';
 import HistoryLog from './components/HistoryLog';
 import PCAutoDiscoveryService from './components/PCAutoDiscoveryService';
 
-type View = 'pc-management' | 'optimizer' | 'history';
+type View = 'dashboard' | 'history';
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<View>('pc-management');
+  const [currentView, setCurrentView] = useState<View>('dashboard');
 
   useEffect(() => {
     const initConnection = async () => {
@@ -32,7 +32,7 @@ const App: React.FC = () => {
       <Header currentView={currentView} onViewChange={setCurrentView} />
       
       <main className="container mx-auto px-4 sm:px-6 lg:px-8">
-        {currentView === 'pc-management' && <PCMonitoringDashboard />}
+        {currentView === 'dashboard' && <PCMonitoringDashboard />}
         {currentView === 'history' && <HistoryLog />}
       </main>
     </div>

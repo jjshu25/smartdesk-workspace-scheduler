@@ -349,12 +349,16 @@ function connectToMainServer() {
     isConnected = true;
     connectionAttempts = 0;
 
+    // ✅ FIXED: Always stop previous metrics before starting new ones
+    stopMetricsCollection();
+
     if (pcId) {
       console.log(`🔄 Resuming PC session: ${pcId}`);
       mainSocket.emit('pc-resume', {
         pcId: pcId,
         timestamp: new Date(),
       });
+      // ✅ FIXED: Start metrics here
       startMetricsCollection(pcId);
     } else {
       console.log(`🆕 First time connection - registering PC`);
@@ -369,7 +373,36 @@ function connectToMainServer() {
     console.log(`✅ PC registered: ${data.pcId}`);
     pcId = data.pcId;
     savePCId(pcId);
+    // ✅ FIXED: Stop previous metrics before starting new ones
+    stopMetricsCollection();
     startMetricsCollection(data.pcId);
+  });
+
+  // ✅ NEW: Listen for resume success
+  mainSocket.on('pc-resumed', (data: any) => {
+    console.log(`✅ PC resumed successfully: ${data.pcId}`);
+    console.log(`📊 Metrics collection active`);
+  });
+
+  // ✅ NEW: Listen for resume failure and re-register
+  mainSocket.on('pc-resume-failed', (data: any) => {
+    console.log(`⚠️  PC Resume failed: ${data.pcId}`);
+    console.log(`🔄 Re-registering PC with server...`);
+    pcId = null;
+    try {
+      if (fs.existsSync(PC_ID_FILE)) {
+        fs.unlinkSync(PC_ID_FILE);
+        console.log(`🗑️  Cleared old PC ID file`);
+      }
+    } catch (error) {
+      console.error(`Failed to delete old PC ID file: ${error}`);
+    }
+    // ✅ FIXED: Stop metrics before re-registering
+    stopMetricsCollection();
+    mainSocket.emit('pc-auto-register', {
+      name: process.env.PC_NAME || `PC-${os.hostname()}`,
+      location: process.env.PC_LOCATION || 'Auto-detected',
+    });
   });
 
   // ✅ NEW: Listen for timer start command from server
@@ -405,6 +438,8 @@ function connectToMainServer() {
     console.log('❌ Disconnected from main server');
     isConnected = false;
     connectionAttempts++;
+    // ✅ FIXED: Stop metrics on disconnect
+    stopMetricsCollection();
 
     if (metricsInterval) {
       console.log(`⏸️  Pausing metrics emission (will resume on reconnect)`);
@@ -422,6 +457,8 @@ function connectToMainServer() {
   mainSocket.on('pc-registration-required', () => {
     console.log(`⚠️  Server says PC needs to register again. Clearing stored ID and re-registering...`);
     pcId = null;
+    // ✅ FIXED: Stop metrics before clearing
+    stopMetricsCollection();
     try {
       if (fs.existsSync(PC_ID_FILE)) {
         fs.unlinkSync(PC_ID_FILE);

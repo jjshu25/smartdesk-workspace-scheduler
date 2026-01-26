@@ -71,6 +71,22 @@ interface PCTimer {
 
 const pcTimers = new Map<string, PCTimer>();
 
+// ✅ NEW: Store PC Session Logs
+interface SessionLog {
+  id: string;
+  pcId: string;
+  pcName: string;
+  userName: string;
+  connectedAt: Date;
+  disconnectedAt?: Date;
+  sessionDuration: number; // in seconds
+  allocatedDuration: number; // in seconds
+  status: 'active' | 'completed' | 'terminated';
+  deskId?: string;
+}
+
+const sessionLogs: Map<string, SessionLog[]> = new Map();
+
 // Helper function to get local IP
 function getLocalIP(): string {
   const interfaces = os.networkInterfaces();
@@ -133,33 +149,32 @@ io.on('connection', (socket) => {
   });
 
   // ✅ NEW: Handle PC resume on reconnection
-  socket.on('pc-resume', (data: { pcId: string; timestamp: Date }) => {
+  socket.on('pc-resume', (data: { pcId: string; timestamp: string }) => {
     const pc = connectedPCs.get(data.pcId);
     
     if (pc) {
-      console.log(`\n🔄 PC RESUMING CONNECTION`);
-      console.log(`   PC ID: ${data.pcId}`);
-      console.log(`   PC Name: ${pc.name}`);
-      console.log(`   Previous Status: ${pc.status}`);
-      console.log(`   Was Offline Since: ${pc.lastDisconnected}`);
-      
-      // Update socket ID and status
-      pc.socketId = socket.id;
-      pc.status = 'online';
+      // ✅ FIXED: PC found - update it
+      console.log(`✅ PC resumed: ${data.pcId}`);
       pc.lastActive = new Date();
-      pc.lastDisconnected = undefined;
+      pc.socketId = socket.id;
       
-      socket.join(`pc-${data.pcId}`);
+      socket.emit('pc-resumed', {
+        pcId: data.pcId,
+        message: 'PC session resumed successfully',
+      });
       
-      console.log(`   New Status: ONLINE ✅\n`);
-      
-      // Broadcast updated PC list to dashboards
-      io.emit('pc-list-updated', Array.from(connectedPCs.values()));
       io.emit('pc-updated', pc);
+      console.log(`📡 Broadcasting PC update after resume`);
     } else {
-      console.log(`⚠️  PC Resume failed: ${data.pcId} not found in registry`);
-      // If PC doesn't exist, treat as new registration
-      socket.emit('pc-registration-required', { message: 'PC needs to register again' });
+      // ✅ FIXED: PC not found - send failure event
+      console.log(`⚠️  PC Resume failed: ${data.pcId} not found`);
+      
+      socket.emit('pc-resume-failed', {
+        pcId: data.pcId,
+        message: 'PC not found in registry. Please re-register.',
+      });
+      
+      console.log(`🔄 Requesting client to re-register...`);
     }
   });
 
@@ -228,14 +243,37 @@ io.on('connection', (socket) => {
   });
 
   // Session started
-  socket.on('session-start', (data: { pcId: string; userName: string; startTime: string }) => {
+  socket.on('session-start', (data: { pcId: string; userName: string; startTime: string; allocatedDuration?: number }) => {
     const pc = connectedPCs.get(data.pcId);
     if (pc) {
       pc.currentUser = data.userName;
       pc.status = 'in-use';
       pc.sessionStartTime = new Date();
-      io.emit('pc-updated', pc);
+      
+      // ✅ NEW: Create session log entry
+      const sessionId = `SESSION-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const sessionLog: SessionLog = {
+        id: sessionId,
+        pcId: data.pcId,
+        pcName: pc.name,
+        userName: data.userName,
+        connectedAt: new Date(),
+        sessionDuration: 0,
+        allocatedDuration: data.allocatedDuration || 0,
+        status: 'active',
+        deskId: data.pcId,
+      };
+
+      if (!sessionLogs.has(data.pcId)) {
+        sessionLogs.set(data.pcId, []);
+      }
+      sessionLogs.get(data.pcId)?.push(sessionLog);
+
       console.log(`👤 Session: ${data.userName} on ${pc.name}`);
+      console.log(`📝 Session ID: ${sessionId}`);
+
+      io.emit('pc-updated', pc);
+      io.emit('session-logged', sessionLog);
     }
   });
 
@@ -246,8 +284,22 @@ io.on('connection', (socket) => {
       pc.currentUser = undefined;
       pc.status = 'online';
       pc.sessionStartTime = undefined;
+
+      // ✅ NEW: Update session log entry
+      const pcSessions = sessionLogs.get(data.pcId);
+      if (pcSessions && pcSessions.length > 0) {
+        const lastSession = pcSessions[pcSessions.length - 1];
+        lastSession.status = 'completed';
+        lastSession.disconnectedAt = new Date();
+        lastSession.sessionDuration = data.sessionDuration;
+
+        console.log(`⏱️ Session ended: ${pc.name} (${data.sessionDuration}ms)`);
+        console.log(`📝 Session: ${lastSession.id}`);
+
+        io.emit('session-logged', lastSession);
+      }
+
       io.emit('pc-updated', pc);
-      console.log(`⏱️ Session ended: ${pc.name} (${data.sessionDuration}ms)`);
     }
   });
 
@@ -523,6 +575,42 @@ app.get('/api/pc/:pcId/timer/status', (req: Request, res: Response) => {
     timeRemaining: timerData?.timeRemaining || 0,
     totalDuration: timerData?.totalDuration || 0,
   });
+});
+
+// ✅ NEW: API endpoint to get all session logs
+app.get('/api/sessions', (req: Request, res: Response) => {
+  const allSessions: SessionLog[] = [];
+  sessionLogs.forEach((sessions) => {
+    allSessions.push(...sessions);
+  });
+  
+  // Sort by most recent first
+  allSessions.sort((a, b) => new Date(b.connectedAt).getTime() - new Date(a.connectedAt).getTime());
+  
+  res.json(allSessions);
+});
+
+// ✅ NEW: API endpoint to get sessions for specific PC
+app.get('/api/pc/:pcId/sessions', (req: Request, res: Response) => {
+  const { pcId } = req.params;
+  const sessions = sessionLogs.get(pcId) || [];
+  
+  // Sort by most recent first
+  const sorted = [...sessions].sort((a, b) => new Date(b.connectedAt).getTime() - new Date(a.connectedAt).getTime());
+  
+  res.json(sorted);
+});
+
+// ✅ NEW: API endpoint to get online PCs with status
+app.get('/api/pcs/online', (req: Request, res: Response) => {
+  const onlinePCs = Array.from(connectedPCs.values()).map(pc => ({
+    ...pc,
+    connectedAt: pc.lastActive,
+    onlineStatus: pc.status,
+    isOnline: pc.status !== 'offline',
+  }));
+
+  res.json(onlinePCs);
 });
 
 const PORT = process.env.PORT || 5000;

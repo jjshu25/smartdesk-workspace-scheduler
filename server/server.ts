@@ -4,8 +4,13 @@ import { createServer } from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import os from 'os';
+import { initializeDatabase } from './database/db.js';
+import { SessionRepository, type SessionLog as DBSessionLog } from './services/sessionRepository.js';
 
 dotenv.config();
+
+// Initialize database
+initializeDatabase();
 
 const app: Express = express();
 const httpServer = createServer(app);
@@ -71,21 +76,7 @@ interface PCTimer {
 
 const pcTimers = new Map<string, PCTimer>();
 
-// ✅ NEW: Store PC Session Logs
-interface SessionLog {
-  id: string;
-  pcId: string;
-  pcName: string;
-  userName: string;
-  connectedAt: Date;
-  disconnectedAt?: Date;
-  sessionDuration: number; // in seconds
-  allocatedDuration: number; // in seconds
-  status: 'active' | 'completed' | 'terminated';
-  deskId?: string;
-}
-
-const sessionLogs: Map<string, SessionLog[]> = new Map();
+// Database session management - SessionLog type imported from repository
 
 // Helper function to get local IP
 function getLocalIP(): string {
@@ -250,9 +241,9 @@ io.on('connection', (socket) => {
       pc.status = 'in-use';
       pc.sessionStartTime = new Date();
       
-      // ✅ NEW: Create session log entry
+      // ✅ NEW: Create session log entry in database
       const sessionId = `SESSION-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const sessionLog: SessionLog = {
+      const sessionLog: DBSessionLog = {
         id: sessionId,
         pcId: data.pcId,
         pcName: pc.name,
@@ -264,13 +255,13 @@ io.on('connection', (socket) => {
         deskId: data.pcId,
       };
 
-      if (!sessionLogs.has(data.pcId)) {
-        sessionLogs.set(data.pcId, []);
+      try {
+        SessionRepository.createSession(sessionLog);
+        console.log(`👤 Session: ${data.userName} on ${pc.name}`);
+        console.log(`📝 Session ID: ${sessionId}`);
+      } catch (error) {
+        console.error(`❌ Failed to create session: ${error}`);
       }
-      sessionLogs.get(data.pcId)?.push(sessionLog);
-
-      console.log(`👤 Session: ${data.userName} on ${pc.name}`);
-      console.log(`📝 Session ID: ${sessionId}`);
 
       io.emit('pc-updated', pc);
       io.emit('session-logged', sessionLog);
@@ -285,18 +276,23 @@ io.on('connection', (socket) => {
       pc.status = 'online';
       pc.sessionStartTime = undefined;
 
-      // ✅ NEW: Update session log entry
-      const pcSessions = sessionLogs.get(data.pcId);
-      if (pcSessions && pcSessions.length > 0) {
-        const lastSession = pcSessions[pcSessions.length - 1];
-        lastSession.status = 'completed';
-        lastSession.disconnectedAt = new Date();
-        lastSession.sessionDuration = data.sessionDuration;
+      // ✅ NEW: Update session log entry in database
+      const activeSessions = SessionRepository.getSessions({
+        pcId: data.pcId,
+        status: 'active',
+        limit: 1,
+      });
+
+      if (activeSessions.length > 0) {
+        const lastSession = activeSessions[0];
+        const updatedSession = SessionRepository.endSession(lastSession.id, data.sessionDuration);
 
         console.log(`⏱️ Session ended: ${pc.name} (${data.sessionDuration}ms)`);
         console.log(`📝 Session: ${lastSession.id}`);
 
-        io.emit('session-logged', lastSession);
+        if (updatedSession) {
+          io.emit('session-logged', updatedSession);
+        }
       }
 
       io.emit('pc-updated', pc);
@@ -577,28 +573,40 @@ app.get('/api/pc/:pcId/timer/status', (req: Request, res: Response) => {
   });
 });
 
-// ✅ NEW: API endpoint to get all session logs
+// ✅ NEW: API endpoint to get all session logs from database
 app.get('/api/sessions', (req: Request, res: Response) => {
-  const allSessions: SessionLog[] = [];
-  sessionLogs.forEach((sessions) => {
-    allSessions.push(...sessions);
-  });
-  
-  // Sort by most recent first
-  allSessions.sort((a, b) => new Date(b.connectedAt).getTime() - new Date(a.connectedAt).getTime());
-  
-  res.json(allSessions);
+  try {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const status = req.query.status as any;
+    
+    const sessions = SessionRepository.getSessions({
+      status,
+      limit,
+      offset,
+    });
+    
+    res.json(sessions);
+  } catch (error) {
+    console.error(`❌ Error fetching sessions: ${error}`);
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
 });
 
-// ✅ NEW: API endpoint to get sessions for specific PC
+// ✅ NEW: API endpoint to get sessions for specific PC from database
 app.get('/api/pc/:pcId/sessions', (req: Request, res: Response) => {
-  const { pcId } = req.params;
-  const sessions = sessionLogs.get(pcId) || [];
-  
-  // Sort by most recent first
-  const sorted = [...sessions].sort((a, b) => new Date(b.connectedAt).getTime() - new Date(a.connectedAt).getTime());
-  
-  res.json(sorted);
+  try {
+    const { pcId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+    
+    const sessions = SessionRepository.getSessionsByPcId(pcId, limit, offset);
+    
+    res.json(sessions);
+  } catch (error) {
+    console.error(`❌ Error fetching PC sessions: ${error}`);
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
 });
 
 // ✅ NEW: API endpoint to get online PCs with status
@@ -611,6 +619,35 @@ app.get('/api/pcs/online', (req: Request, res: Response) => {
   }));
 
   res.json(onlinePCs);
+});
+
+// ✅ NEW: API endpoint to get session statistics
+app.get('/api/sessions/stats', (req: Request, res: Response) => {
+  try {
+    const pcId = req.query.pcId as string;
+    const stats = SessionRepository.getSessionStats(pcId);
+    res.json(stats);
+  } catch (error) {
+    console.error(`❌ Error fetching session stats: ${error}`);
+    res.status(500).json({ error: 'Failed to fetch statistics' });
+  }
+});
+
+// ✅ NEW: API endpoint to get session by ID
+app.get('/api/sessions/:sessionId', (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const session = SessionRepository.getSessionById(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    res.json(session);
+  } catch (error) {
+    console.error(`❌ Error fetching session: ${error}`);
+    res.status(500).json({ error: 'Failed to fetch session' });
+  }
 });
 
 const PORT = process.env.PORT || 5000;

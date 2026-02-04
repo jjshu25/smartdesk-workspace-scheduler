@@ -31,11 +31,24 @@ interface HistoryLogProps {
   pcSessions?: PCSessionLog[] | null;
 }
 
+interface SessionStats {
+  totalSessions: number;
+  activeSessions: number;
+  completedSessions: number;
+  terminatedSessions: number;
+  totalDuration: number;
+  averageDuration: number;
+}
+
 const HistoryLog: React.FC<HistoryLogProps> = () => {
   const [sessions, setSessions] = useState<PCSessionLog[]>([]);
   const [onlinePCs, setOnlinePCs] = useState<OnlinePC[]>([]);
   const [loading, setLoading] = useState(true);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'terminated'>('all');
 
   useEffect(() => {
     // Connect to server
@@ -49,15 +62,15 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
       console.log('✅ Connected to server');
       fetchSessions();
       fetchOnlinePCs();
+      fetchSessionStats();
     });
 
     // ✅ NEW: Listen for real-time session updates
     newSocket.on('session-logged', (session: PCSessionLog) => {
       console.log('📝 New session logged:', session);
-      setSessions(prev => {
-        const updated = [session, ...prev];
-        return updated.sort((a, b) => new Date(b.connectedAt).getTime() - new Date(a.connectedAt).getTime());
-      });
+      // Refresh sessions to get updated data from database
+      fetchSessions();
+      fetchSessionStats();
     });
 
     // ✅ NEW: Listen for PC status updates
@@ -84,9 +97,17 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
 
   const fetchSessions = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/sessions');
+      const offset = (currentPage - 1) * pageSize;
+      const statusQuery = statusFilter !== 'all' ? `&status=${statusFilter}` : '';
+      const response = await fetch(`http://localhost:5000/api/sessions?limit=${pageSize}&offset=${offset}${statusQuery}`);
       const data = await response.json();
-      setSessions(data);
+      // Convert date strings to Date objects
+      const sessionsWithDates = data.map((session: any) => ({
+        ...session,
+        connectedAt: new Date(session.connectedAt),
+        disconnectedAt: session.disconnectedAt ? new Date(session.disconnectedAt) : undefined,
+      }));
+      setSessions(sessionsWithDates);
     } catch (error) {
       console.error('❌ Error fetching sessions:', error);
     }
@@ -99,6 +120,16 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
       setOnlinePCs(data);
     } catch (error) {
       console.error('❌ Error fetching online PCs:', error);
+    }
+  };
+
+  const fetchSessionStats = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/sessions/stats');
+      const data = await response.json();
+      setSessionStats(data);
+    } catch (error) {
+      console.error('❌ Error fetching session stats:', error);
     }
   };
 
@@ -144,6 +175,25 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
     } catch {
       return '—';
     }
+  };
+
+  const handleStatusFilterChange = (newStatus: 'all' | 'active' | 'completed' | 'terminated') => {
+    setStatusFilter(newStatus);
+    setCurrentPage(1);
+    // Fetch with new filter
+    const offset = 0;
+    const statusQuery = newStatus !== 'all' ? `&status=${newStatus}` : '';
+    fetch(`http://localhost:5000/api/sessions?limit=${pageSize}&offset=${offset}${statusQuery}`)
+      .then(res => res.json())
+      .then(data => {
+        const sessionsWithDates = data.map((session: any) => ({
+          ...session,
+          connectedAt: new Date(session.connectedAt),
+          disconnectedAt: session.disconnectedAt ? new Date(session.disconnectedAt) : undefined,
+        }));
+        setSessions(sessionsWithDates);
+      })
+      .catch(err => console.error('Error fetching filtered sessions:', err));
   };
 
   if (loading) {
@@ -203,11 +253,59 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
 
       {/* Session History Tab */}
       <div>
-        <h3 className="text-2xl font-bold text-slate-700 mb-4 flex items-center">
-          <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
-          Session History
-          <span className="ml-2 text-sm text-slate-500 font-normal">({sessions.length})</span>
-        </h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-bold text-slate-700 flex items-center">
+            <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+            Session History
+            {sessionStats && (
+              <span className="ml-4 text-sm text-slate-500 font-normal">
+                Total: {sessionStats.totalSessions} | Active: {sessionStats.activeSessions} | Completed: {sessionStats.completedSessions}
+              </span>
+            )}
+          </h3>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleStatusFilterChange('all')}
+              className={`px-3 py-1 rounded text-sm font-medium ${
+                statusFilter === 'all'
+                  ? 'bg-slate-800 text-white'
+                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => handleStatusFilterChange('active')}
+              className={`px-3 py-1 rounded text-sm font-medium ${
+                statusFilter === 'active'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => handleStatusFilterChange('completed')}
+              className={`px-3 py-1 rounded text-sm font-medium ${
+                statusFilter === 'completed'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              Completed
+            </button>
+            <button
+              onClick={() => handleStatusFilterChange('terminated')}
+              className={`px-3 py-1 rounded text-sm font-medium ${
+                statusFilter === 'terminated'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              Terminated
+            </button>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 border border-slate-200 rounded-lg">
             <thead className="bg-slate-50">
@@ -247,6 +345,46 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
               )}
             </tbody>
           </table>
+        </div>
+        {/* Pagination Controls */}
+        <div className="flex justify-between items-center mt-4">
+          <div className="text-sm text-slate-600">
+            Page {currentPage} | Showing {sessions.length} sessions per page
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (currentPage > 1) {
+                  setCurrentPage(currentPage - 1);
+                  fetchSessions();
+                }
+              }}
+              disabled={currentPage === 1}
+              className={`px-4 py-2 rounded text-sm font-medium ${
+                currentPage === 1
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-slate-800 text-white hover:bg-slate-900'
+              }`}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => {
+                if (sessions.length === pageSize) {
+                  setCurrentPage(currentPage + 1);
+                  fetchSessions();
+                }
+              }}
+              disabled={sessions.length < pageSize}
+              className={`px-4 py-2 rounded text-sm font-medium ${
+                sessions.length < pageSize
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-slate-800 text-white hover:bg-slate-900'
+              }`}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </div>

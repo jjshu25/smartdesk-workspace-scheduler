@@ -64,7 +64,7 @@ function savePCId(id: string) {
 }
 
 // ✅ NEW: ESP32 Configuration
-const ESP32_URL = process.env.ESP32_URL || 'http://192.168.5.74';
+const ESP32_URL = process.env.ESP32_URL || 'http://172.20.10.3';
 const ESP32_TIMER_ENDPOINT = `${ESP32_URL}/api/timer`;
 
 // ✅ NEW: Send timer data to ESP32

@@ -16,8 +16,8 @@ int GPU_TEMP = 0;
 bool has_temps = false;
 
 // WiFi credentials
-const char* ssid = "GUIA";
-const char* password = "guia@alvin2002";
+const char* ssid = "Redmi 10C";
+const char* password = "qwertyuiop";
 
 WebServer server(80);
 

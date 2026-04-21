@@ -134,18 +134,13 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
   };
 
   const formatSeconds = (seconds: number): string => {
-    if (!seconds || seconds < 0) return '0s';
-    
+    if (!seconds || seconds < 0) return '00:00:00';
+
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.round(seconds % 60);
 
-    const parts = [];
-    if (hours > 0) parts.push(`${hours}h`);
-    if (minutes > 0) parts.push(`${minutes}m`);
-    if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
-
-    return parts.join(' ');
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   const getStatusColor = (status: string) => {
@@ -266,41 +261,37 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
           <div className="flex gap-2">
             <button
               onClick={() => handleStatusFilterChange('all')}
-              className={`px-3 py-1 rounded text-sm font-medium ${
-                statusFilter === 'all'
-                  ? 'bg-slate-800 text-white'
-                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-              }`}
+              className={`px-3 py-1 rounded text-sm font-medium ${statusFilter === 'all'
+                ? 'bg-slate-800 text-white'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
             >
               All
             </button>
             <button
               onClick={() => handleStatusFilterChange('active')}
-              className={`px-3 py-1 rounded text-sm font-medium ${
-                statusFilter === 'active'
-                  ? 'bg-green-600 text-white'
-                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-              }`}
+              className={`px-3 py-1 rounded text-sm font-medium ${statusFilter === 'active'
+                ? 'bg-green-600 text-white'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
             >
               Active
             </button>
             <button
               onClick={() => handleStatusFilterChange('completed')}
-              className={`px-3 py-1 rounded text-sm font-medium ${
-                statusFilter === 'completed'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-              }`}
+              className={`px-3 py-1 rounded text-sm font-medium ${statusFilter === 'completed'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
             >
               Completed
             </button>
             <button
               onClick={() => handleStatusFilterChange('terminated')}
-              className={`px-3 py-1 rounded text-sm font-medium ${
-                statusFilter === 'terminated'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-              }`}
+              className={`px-3 py-1 rounded text-sm font-medium ${statusFilter === 'terminated'
+                ? 'bg-red-600 text-white'
+                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
             >
               Terminated
             </button>
@@ -360,11 +351,10 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
                 }
               }}
               disabled={currentPage === 1}
-              className={`px-4 py-2 rounded text-sm font-medium ${
-                currentPage === 1
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-slate-800 text-white hover:bg-slate-900'
-              }`}
+              className={`px-4 py-2 rounded text-sm font-medium ${currentPage === 1
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-slate-800 text-white hover:bg-slate-900'
+                }`}
             >
               Previous
             </button>
@@ -376,11 +366,10 @@ const HistoryLog: React.FC<HistoryLogProps> = () => {
                 }
               }}
               disabled={sessions.length < pageSize}
-              className={`px-4 py-2 rounded text-sm font-medium ${
-                sessions.length < pageSize
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-slate-800 text-white hover:bg-slate-900'
-              }`}
+              className={`px-4 py-2 rounded text-sm font-medium ${sessions.length < pageSize
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-slate-800 text-white hover:bg-slate-900'
+                }`}
             >
               Next
             </button>

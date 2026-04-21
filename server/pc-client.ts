@@ -101,7 +101,7 @@ async function sendTimerToESP32(timerData: {
 function startTimer(durationInSeconds: number, userName: string = 'Unknown') {
   try {
     const validDuration = Math.max(parseInt(String(durationInSeconds), 10), 1);
-    
+
     if (timerActive) {
       console.log(`⚠️  Timer already running! Duration remaining: ${timerDuration}s`);
       return;
@@ -211,14 +211,13 @@ function stopTimer(userName: string = 'Unknown') {
       mainSocket.emit('session-end', {
         pcId: pcId,
         userName: userName,
-        sessionDuration: sessionDuration,
+        sessionDuration: Math.floor(sessionDuration / 1000),  // ✅ Convert milliseconds to seconds
         endTime: endTime.toISOString(),
       });
-      
       mainSocket.emit('timer-stopped', {
         pcId: pcId,
       });
-      
+
       console.log(`📡 Session end notification sent to server`);
     }
 
@@ -238,7 +237,7 @@ function stopTimer(userName: string = 'Unknown') {
     console.log(`⏰ Time: ${endTime.toLocaleTimeString()}`);
     console.log(`👤 User: ${userName}`);
     console.log(`${'='.repeat(60)}\n`);
-    
+
     setTimeout(() => {
       logoutUser();
     }, 2000); // 2 second delay before logout
@@ -299,11 +298,11 @@ function startMetricsCollection(registeredPcId: string) {
 
       // Get CPU usage
       const cpuUsage = await si.currentLoad();
-      
+
       // Get memory usage
       const mem = await si.mem();
       const memoryUsage = (mem.used / mem.total) * 100;
-      
+
       // Get disk usage
       const fsSize = await si.fsSize();
       const totalDisk = fsSize.reduce((sum, disk) => sum + disk.size, 0);
@@ -514,11 +513,11 @@ function handleCommand(command: string, params?: any) {
 function logoutUser() {
   try {
     const platform = os.platform();
-    
+
     console.log(`📌 ACTION: Logging out user`);
     console.log(`⏳ Status: In Progress...`);
     console.log(`⏰ Time: ${new Date().toLocaleTimeString()}`);
-    
+
     if (platform === 'win32') {
       console.log(`🪟 Executing Windows logout command: shutdown /l /f`);
       console.log('👤 Logging out user from Windows...');
@@ -546,10 +545,10 @@ function logoutUser() {
         console.log('⚠️  Logout command sent');
       }
     }
-    
+
     console.log(`✅ SUCCESS: Logout command executed`);
     console.log(`${'='.repeat(60)}\n`);
-    
+
     // Send response if socket is available
     if (mainSocket && mainSocket.connected) {
       mainSocket.emit('command-executed', { command: 'logout', status: 'success' });
@@ -558,7 +557,7 @@ function logoutUser() {
     console.error(`❌ FAILED: Logout failed`);
     console.error(`📋 Error Details: ${error}`);
     console.log(`${'='.repeat(60)}\n`);
-    
+
     // Send response if socket is available
     if (mainSocket && mainSocket.connected) {
       mainSocket.emit('command-executed', { command: 'logout', status: 'failed', error: String(error) });
@@ -570,15 +569,15 @@ function logoutUser() {
 function lockUSB() {
   try {
     const platform = os.platform();
-    
+
     console.log(`📌 ACTION: Disabling Keyboard & Mouse Only`);
     console.log(`⏳ Status: In Progress...`);
-    
+
     if (platform === 'win32') {
       // Windows: Disable only Keyboard and Mouse
       console.log(`🪟 Executing Windows USB disable command`);
       console.log(`📋 Command: Disabling Keyboard & Mouse devices only...`);
-      
+
       try {
         // Method 1: Get device IDs and disable immediately
         console.log(`  → Finding and disabling HID Keyboard...`);
@@ -586,11 +585,11 @@ function lockUSB() {
           'powershell -Command "Get-PnpDevice -Class Keyboard -Status OK | Select-Object -ExpandProperty InstanceId"',
           { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
         ).trim().split('\n').filter((id: string) => id);
-        
+
         for (const deviceId of keyboardDevices) {
           if (deviceId) {
             try {
-              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`,
                 { stdio: 'inherit' });
               console.log(`    ✓ Disabled: ${deviceId}`);
             } catch (e) {
@@ -598,17 +597,17 @@ function lockUSB() {
             }
           }
         }
-        
+
         console.log(`  → Finding and disabling HID Mouse...`);
         const mouseDevices = execSync(
           'powershell -Command "Get-PnpDevice -Class Mouse -Status OK | Select-Object -ExpandProperty InstanceId"',
           { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
         ).trim().split('\n').filter((id: string) => id);
-        
+
         for (const deviceId of mouseDevices) {
           if (deviceId) {
             try {
-              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+              execSync(`powershell -Command "Disable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`,
                 { stdio: 'inherit' });
               console.log(`    ✓ Disabled: ${deviceId}`);
             } catch (e) {
@@ -616,7 +615,7 @@ function lockUSB() {
             }
           }
         }
-        
+
         console.log(`🔴 Keyboard & Mouse disabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse locked in REAL-TIME (no restart needed)`);
       } catch (error) {
@@ -628,12 +627,12 @@ function lockUSB() {
             'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Disable() }"',
             { stdio: 'inherit' }
           );
-          
+
           execSync(
             'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Disable() }"',
             { stdio: 'inherit' }
           );
-          
+
           console.log(`✅ SUCCESS: Keyboard & Mouse disabled using WMI (REAL-TIME)`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
@@ -665,7 +664,7 @@ function lockUSB() {
         throw error;
       }
     }
-    
+
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'lock-usb', status: 'success' });
   } catch (error) {
@@ -680,15 +679,15 @@ function lockUSB() {
 function unlockUSB() {
   try {
     const platform = os.platform();
-    
+
     console.log(`📌 ACTION: Re-enabling Keyboard & Mouse`);
     console.log(`⏳ Status: In Progress...`);
-    
+
     if (platform === 'win32') {
       // Windows: Re-enable only Keyboard and Mouse
       console.log(`🪟 Executing Windows USB enable command`);
       console.log(`📋 Command: Re-enabling Keyboard & Mouse devices only...`);
-      
+
       try {
         // Method 1: Get device IDs and enable immediately
         console.log(`  → Finding and enabling HID Keyboard...`);
@@ -696,11 +695,11 @@ function unlockUSB() {
           'powershell -Command "Get-PnpDevice -Class Keyboard -Status Error | Select-Object -ExpandProperty InstanceId"',
           { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
         ).trim().split('\n').filter((id: string) => id);
-        
+
         for (const deviceId of keyboardDevices) {
           if (deviceId) {
             try {
-              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`,
                 { stdio: 'inherit' });
               console.log(`    ✓ Enabled: ${deviceId}`);
             } catch (e) {
@@ -708,17 +707,17 @@ function unlockUSB() {
             }
           }
         }
-        
+
         console.log(`  → Finding and enabling HID Mouse...`);
         const mouseDevices = execSync(
           'powershell -Command "Get-PnpDevice -Class Mouse -Status Error | Select-Object -ExpandProperty InstanceId"',
           { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
         ).trim().split('\n').filter((id: string) => id);
-        
+
         for (const deviceId of mouseDevices) {
           if (deviceId) {
             try {
-              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`, 
+              execSync(`powershell -Command "Enable-PnpDevice -InstanceId '${deviceId}' -Confirm:$false"`,
                 { stdio: 'inherit' });
               console.log(`    ✓ Enabled: ${deviceId}`);
             } catch (e) {
@@ -726,7 +725,7 @@ function unlockUSB() {
             }
           }
         }
-        
+
         console.log(`🟢 Keyboard & Mouse re-enabled`);
         console.log(`✅ SUCCESS: Keyboard & Mouse unlocked in REAL-TIME (no restart needed)`);
       } catch (error) {
@@ -738,12 +737,12 @@ function unlockUSB() {
             'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Keyboard*\'} | ForEach-Object { $_.Enable() }"',
             { stdio: 'inherit' }
           );
-          
+
           execSync(
             'powershell -Command "Get-WmiObject Win32_PnPDevice -Filter \\"ClassGuid=\'{4D1E55B2-F16F-11CF-88CB-001111000030}\'\\\" | Where-Object {$_.Name -like \'*Mouse*\'} | ForEach-Object { $_.Enable() }"',
             { stdio: 'inherit' }
           );
-          
+
           console.log(`✅ SUCCESS: Keyboard & Mouse enabled using WMI (REAL-TIME)`);
         } catch (e) {
           console.error(`❌ Both methods failed. Ensure running as Administrator.`);
@@ -775,7 +774,7 @@ function unlockUSB() {
         throw error;
       }
     }
-    
+
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'unlock-usb', status: 'success' });
   } catch (error) {
@@ -790,11 +789,11 @@ function unlockUSB() {
 function restartPC() {
   try {
     const platform = os.platform();
-    
+
     console.log(`📌 ACTION: Restarting PC`);
     console.log(`⏳ Status: In Progress...`);
     console.log(`⚠️  WARNING: System will restart in 10 seconds!`);
-    
+
     if (platform === 'win32') {
       console.log(`🪟 Executing Windows restart command: shutdown /r /t 10`);
       console.log('🔄 Restarting PC (Windows)...');
@@ -808,7 +807,7 @@ function restartPC() {
       console.log('🔄 Restarting PC (Linux)...');
       execSync('sudo shutdown -r +1', { stdio: 'inherit' });
     }
-    
+
     console.log(`✅ SUCCESS: Restart command executed`);
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'restart', status: 'success' });
@@ -824,11 +823,11 @@ function restartPC() {
 function shutdownPC() {
   try {
     const platform = os.platform();
-    
+
     console.log(`📌 ACTION: Shutting down PC`);
     console.log(`⏳ Status: In Progress...`);
     console.log(`⚠️  WARNING: System will shutdown in 10 seconds!`);
-    
+
     if (platform === 'win32') {
       console.log(`🪟 Executing Windows shutdown command: shutdown /s /t 10`);
       console.log('⏹️ Shutting down PC (Windows)...');
@@ -842,7 +841,7 @@ function shutdownPC() {
       console.log('⏹️ Shutting down PC (Linux)...');
       execSync('sudo shutdown -h +1', { stdio: 'inherit' });
     }
-    
+
     console.log(`✅ SUCCESS: Shutdown command executed`);
     console.log(`${'='.repeat(60)}\n`);
     mainSocket.emit('command-executed', { command: 'shutdown', status: 'success' });
@@ -857,12 +856,12 @@ function shutdownPC() {
 // ✅ NEW: Graceful shutdown handler
 function gracefulShutdown() {
   console.log('\n📴 Shutting down PC Client gracefully...');
-  
+
   // Stop timer if active
   if (timerActive) {
     stopTimer('System Shutdown');
   }
-  
+
   if (metricsInterval) {
     clearInterval(metricsInterval);
   }

@@ -31,7 +31,7 @@ const PCMonitoringDashboard: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const [timerStatus, setTimerStatus] = useState<{ [key: string]: TimerStatus }>({});
   const [socket, setSocket] = useState<any>(null);
-  
+
   // ✅ NEW: Global timer controls
   const [globalTimerDuration, setGlobalTimerDuration] = useState<number>(0);
   const [selectedPCForTimer, setSelectedPCForTimer] = useState<string>('');
@@ -377,7 +377,7 @@ const PCMonitoringDashboard: React.FC = () => {
                 const value = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
                 setGlobalTimerDuration(value);
               }}
-              placeholder="Enter seconds..."
+              placeholder="Enter duration in seconds..."
               min="0"
               disabled={activeTimerPC !== ''}
               className="w-full px-3 py-2 text-gray-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-gray-300"
@@ -407,22 +407,20 @@ const PCMonitoringDashboard: React.FC = () => {
             <button
               onClick={startGlobalTimer}
               disabled={activeTimerPC !== '' || !selectedPCForTimer || globalTimerDuration <= 0}
-              className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                activeTimerPC !== '' || !selectedPCForTimer || globalTimerDuration <= 0
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-green-500 hover:bg-green-600'
-              }`}
+              className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${activeTimerPC !== '' || !selectedPCForTimer || globalTimerDuration <= 0
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-green-500 hover:bg-green-600'
+                }`}
             >
               ▶️ Start
             </button>
             <button
               onClick={stopGlobalTimer}
               disabled={activeTimerPC === ''}
-              className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                activeTimerPC === ''
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-red-500 hover:bg-red-600'
-              }`}
+              className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${activeTimerPC === ''
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-red-500 hover:bg-red-600'
+                }`}
             >
               ⏹️ Stop
             </button>
@@ -435,9 +433,8 @@ const PCMonitoringDashboard: React.FC = () => {
         {pcs.map((pc) => (
           <div
             key={pc.id}
-            className={`bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow ${
-              activeTimerPC === pc.id ? 'ring-2 ring-blue-500' : ''
-            }`}
+            className={`bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow ${activeTimerPC === pc.id ? 'ring-2 ring-blue-500' : ''
+              }`}
           >
             {/* PC Header */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-4">
@@ -525,11 +522,10 @@ const PCMonitoringDashboard: React.FC = () => {
                   <button
                     onClick={() => sendCommand(pc.id, 'logout')}
                     disabled={pc.status === 'offline'}
-                    className={`px-3 py-2 text-white text-sm rounded font-semibold transition-colors flex items-center justify-center gap-1 ${
-                      pc.status === 'offline'
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-yellow-500 hover:bg-yellow-600'
-                    }`}
+                    className={`px-3 py-2 text-white text-sm rounded font-semibold transition-colors flex items-center justify-center gap-1 ${pc.status === 'offline'
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-yellow-500 hover:bg-yellow-600'
+                      }`}
                   >
                     👤 Logout
                   </button>
@@ -537,11 +533,10 @@ const PCMonitoringDashboard: React.FC = () => {
                   <button
                     onClick={() => sendDangerousCommand(pc.id, 'restart')}
                     disabled={pc.status === 'offline'}
-                    className={`px-3 py-2 text-white text-sm rounded font-semibold transition-colors flex items-center justify-center gap-1 ${
-                      pc.status === 'offline'
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-orange-500 hover:bg-orange-600'
-                    }`}
+                    className={`px-3 py-2 text-white text-sm rounded font-semibold transition-colors flex items-center justify-center gap-1 ${pc.status === 'offline'
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-orange-500 hover:bg-orange-600'
+                      }`}
                   >
                     🔄 Restart
                   </button>
@@ -550,11 +545,10 @@ const PCMonitoringDashboard: React.FC = () => {
                 <button
                   onClick={() => sendDangerousCommand(pc.id, 'shutdown')}
                   disabled={pc.status === 'offline'}
-                  className={`w-full px-3 py-2 text-white text-sm rounded font-semibold transition-colors ${
-                    pc.status === 'offline'
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-gray-800 hover:bg-gray-900'
-                  }`}
+                  className={`w-full px-3 py-2 text-white text-sm rounded font-semibold transition-colors ${pc.status === 'offline'
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-gray-800 hover:bg-gray-900'
+                    }`}
                 >
                   ⏹️ Shutdown
                 </button>
